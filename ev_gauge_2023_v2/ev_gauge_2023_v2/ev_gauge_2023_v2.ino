@@ -1,12 +1,11 @@
 
 // TFT Connections
-// SCL: GPIO12
-// SDA: GPIO26
-// RST: GPIO27
-// RS/DC:  GPIO14
-// CS   GPI013
+// SCL: GPIO18
+// SDA: GPIO23
+// RS/DC:  GPIO2
+// RST: GPIO4
+// CS   GPIO5
 // BLK 3v3 (Backlight)
-
 
 // CAN_RXD = ESP32 – IO25
 // CAN_TXD = ESP32 – IO26
@@ -41,12 +40,16 @@
 #include <Fonts/FreeSansBold24pt7b.h>
 
 // Configure i2c pins for display
-#define TFT_SDA        26        
-#define TFT_SCL        12
-#define TFT_CS         13
-#define TFT_RST        27
-#define TFT_DC         14
+#define TFT_SDA        23        
+#define TFT_SCL        18
+#define TFT_CS         5
+#define TFT_RST        4
+#define TFT_DC         2
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
+
+// Configure CAN TX/RX Pins
+#define CAN_TX GPIO_NUM_26
+#define CAN_RX GPIO_NUM_25
 
 // Pi for circle drawing
 float p = 3.1415926;
@@ -61,8 +64,9 @@ void setup() {
   
 // Initialise CANBus
   Serial.println("Initializing ...");
-  CAN0.setCANPins(GPIO_NUM_23, GPIO_NUM_22);
+  CAN0.setCANPins(CAN_TX, CAN_RX);
   CAN0.begin(500000);
+  pinMode(TFT_RST, OUTPUT);
 
 // Initialise 1.8" TFT screen:
   tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
@@ -74,10 +78,10 @@ void setup() {
   Serial.println("Ready ...!");
 
   // Set up can filters for target IDs
-  CAN0.watchFor(0x355, 0xF00); //setup a special filter to watch for only 0x355 to get SoC
-  CAN0.watchFor(0x355, 0xF00); //setup a special filter to watch for only 0x356 to get module temps
-  CAN0.watchFor(0x373, 0xF00); //setup a special filter to watch for only 0x373 to get cell deltas  
-  CAN0.watchFor(); //then let everything else through anyway - enable for debugging
+  CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
+  CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
+  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas  
+  //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
 
   // Set callbacks for target IDs to process and update display
   CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
@@ -85,9 +89,9 @@ void setup() {
   CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
  
   // Initial display of SoC before data arrives
-  tft.setFont(&FreeSansBold24pt7b);
-  tft.setCursor(20, 70);
-  tft.setTextSize(1);
+//  tft.setFont(&FreeSansBold24pt7b);
+//  tft.setCursor(20, 70);
+//  tft.setTextSize(1);
   tft.setFont(&FreeSansBold9pt7b);
   tft.setCursor(10, 70);
   tft.setTextSize(1);
@@ -137,17 +141,23 @@ void printFrame(CAN_FRAME *message)
 
 void soc_proc(CAN_FRAME *message) {
   printFrame(message);
-  if((message->data.byte[0] + (message->data.byte[1] <<8)) != soc){
-    soc = message->data.byte[0] + (message->data.byte[1] <<8); 
-    tft.setCursor(20, 40);
-    tft.setTextSize(6);
+  if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
+    soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
     if(soc) {
+      tft.drawRect(0,0,128,100,ST77XX_BLACK);
+      tft.fillRect(0,0,128,100,ST77XX_BLACK);
+      tft.setCursor(18,70);
+      tft.setFont(&FreeSansBold24pt7b);
+      tft.setTextSize(1);
       tft.print(soc);
       tft.print("%");
       printf("SoC: ");
       printf("%d%%", soc);
-      printf("/n");      
+      printf("\n");      
     } else {
+      tft.setCursor(18,70);
+      tft.setFont(&FreeSansBold24pt7b);
+      tft.setTextSize(2);
       tft.print("N/A");
     }  
   }
@@ -155,20 +165,25 @@ void soc_proc(CAN_FRAME *message) {
 
 void temp_proc(CAN_FRAME *message) {
   printFrame(message);
-  if((10*(message->data.byte[4] + (message->data.byte[5] <<8))) != temp) {
-    temp = 10*(message->data.byte[4] + (message->data.byte[5] <<8));  
+  if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
+    temp = (message->data.byte[4] + (message->data.byte[5] <<8))/10;  
     // Module Temp
-    tft.fillCircle(10, 140, 2, ST77XX_RED);
-    tft.fillCircle(10, 150, 4, ST77XX_RED);
-    tft.fillRect(8, 140, 5, 6, ST77XX_RED);
-    tft.setCursor(20, 140);
-    tft.setTextSize(2);
     if(temp) {
+      tft.drawRect(13,120,51,40,ST77XX_BLACK);
+      tft.fillRect(13,120,51,40,ST77XX_BLACK);
+      tft.setCursor(16, 153);
+      tft.setFont(&FreeSansBold9pt7b);
+      tft.setTextSize(1);
       tft.print(temp);
       printf("Temp: ");
       printf("%d%%", temp);
       printf("/n");
     } else {
+      tft.drawRect(13,120,51,40,ST77XX_BLACK);
+      tft.fillRect(13,120,51,40,ST77XX_BLACK);
+      tft.setCursor(16, 153);
+      tft.setFont(&FreeSansBold9pt7b);
+      tft.setTextSize(1);
       tft.print("N/A");
     }
   }
@@ -176,20 +191,27 @@ void temp_proc(CAN_FRAME *message) {
 
 void delta_proc(CAN_FRAME *message) {
   printFrame(message);  
-  if((message->data.byte[2] + (message->data.byte[2] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
-    delta = (message->data.byte[2] + (message->data.byte[2] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
+  if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
+    delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
   // Max Delta
-  tft.fillTriangle(25, 24, 35, 8, 44, 24, ST77XX_BLUE);
-  tft.setCursor(50, 10);
-  tft.setTextSize(2);
   if(delta) {
-    tft.print(delta);
-    tft.print("mV");
-    printf("Delta: ");
-    printf("%d%%", delta);
-    printf("/n");    
+      tft.drawRect(80,120,48,40,ST77XX_BLACK);
+      tft.fillRect(80,120,48,40,ST77XX_BLACK);
+      tft.setCursor(84, 153);
+      tft.setFont(&FreeSansBold9pt7b);
+      tft.setTextSize(1);
+      tft.print(delta);
+//      tft.print("mV");
+      printf("Delta: ");
+      printf("%d%%", delta);
+      printf("/n");    
     } else {
-    tft.print("N/A");
+      tft.drawRect(80,120,48,40,ST77XX_BLACK);
+      tft.fillRect(80,120,48,40,ST77XX_BLACK);
+      tft.setCursor(84, 153);
+      tft.setFont(&FreeSansBold9pt7b);
+      tft.setTextSize(1);
+      tft.print("N/A");
     }
   }
 }
