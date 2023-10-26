@@ -143,7 +143,18 @@ void soc_proc(CAN_FRAME *message) {
   printFrame(message);
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
     soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
-    if(soc) {
+
+    if(soc > 100) {
+      tft.drawRect(0,0,128,100,ST77XX_BLACK);
+      tft.fillRect(0,0,128,100,ST77XX_BLACK);
+      tft.setCursor(18,70);
+      tft.setFont(&FreeSansBold24pt7b);
+      tft.setTextSize(1);
+      tft.print("ERR");
+      printf("SoC error >> SoC: ");
+      printf("%d%%", soc);
+      printf("/n");            
+    } else if(soc) {
       tft.drawRect(0,0,128,100,ST77XX_BLACK);
       tft.fillRect(0,0,128,100,ST77XX_BLACK);
       tft.setCursor(18,70);
@@ -168,7 +179,17 @@ void temp_proc(CAN_FRAME *message) {
   if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
     temp = (message->data.byte[4] + (message->data.byte[5] <<8))/10;  
     // Module Temp
-    if(temp) {
+    if(temp > 150) {
+      tft.drawRect(13,120,51,40,ST77XX_BLACK);
+      tft.fillRect(13,120,51,40,ST77XX_BLACK);
+      tft.setCursor(16, 153);
+      tft.setFont(&FreeSansBold9pt7b);
+      tft.setTextSize(1);
+      tft.print("ERR");
+      printf("Temp error >> Temp: ");
+      printf("%d%%", temp);
+      printf("/n");
+  } else if(temp) {
       tft.drawRect(13,120,51,40,ST77XX_BLACK);
       tft.fillRect(13,120,51,40,ST77XX_BLACK);
       tft.setCursor(16, 153);
@@ -194,7 +215,17 @@ void delta_proc(CAN_FRAME *message) {
   if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
     delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
   // Max Delta
-  if(delta) {
+    if(delta < 0) {
+      tft.drawRect(80,120,48,40,ST77XX_BLACK);
+      tft.fillRect(80,120,48,40,ST77XX_BLACK);
+      tft.setCursor(84, 153);
+      tft.setFont(&FreeSansBold9pt7b);
+      tft.setTextSize(1);
+      tft.print("ERR");
+      printf("Delta error >> Delta: ");
+      printf("%d%%", delta);
+      printf("/n");    
+    } else if(delta) {
       tft.drawRect(80,120,48,40,ST77XX_BLACK);
       tft.fillRect(80,120,48,40,ST77XX_BLACK);
       tft.setCursor(84, 153);
