@@ -1,14 +1,25 @@
 
-// TFT Connections
-// SCL: GPIO18
+// TFT Connections: 30 Pin
+// SCL: GPIO18 
 // SDA: GPIO23
 // RS/DC:  GPIO2
 // RST: GPIO4
 // CS   GPIO5
 // BLK 3v3 (Backlight)
 
-// CAN_RXD = ESP32 – IO25
-// CAN_TXD = ESP32 – IO26
+// CAN_RXD = ESP32 – IO26
+// CAN_TXD = ESP32 – IO25
+
+// TFT Connections: 38 Pin
+// SCL: GPIO13
+// SDA: GPIO12
+// RS/DC:  GPIO27
+// RST: GPIO14
+// CS   GPI26
+// BLK 3v3 (Backlight)
+
+// CAN_RXD = ESP32 – IO22
+// CAN_TXD = ESP32 – IO23
 
 // SIMPBMS CANBUS SIGNALS
 // 0x355 BYTE 0 SOC LSB SCALE 1
@@ -40,16 +51,16 @@
 #include <Fonts/FreeSansBold24pt7b.h>
 
 // Configure i2c pins for display
-#define TFT_SDA        23        
-#define TFT_SCL        18
-#define TFT_CS         5
-#define TFT_RST        4
-#define TFT_DC         2
+#define TFT_SDA        12        
+#define TFT_SCL        13
+#define TFT_CS         26
+#define TFT_RST        14
+#define TFT_DC         27
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
 
 // Configure CAN TX/RX Pins
-#define CAN_TX GPIO_NUM_26
-#define CAN_RX GPIO_NUM_25
+#define CAN_TX GPIO_NUM_23 // This is for 
+#define CAN_RX GPIO_NUM_22
 
 // Pi for circle drawing
 float p = 3.1415926;
