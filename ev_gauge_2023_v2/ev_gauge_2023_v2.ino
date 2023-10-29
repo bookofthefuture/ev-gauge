@@ -43,6 +43,9 @@
 #include <SPI.h>
 #include <Arduino.h>
 #include <esp32_can.h> // ESP32 native can library
+#include <ElegantOTA.h>
+
+
 
 // Include fonts for display
 #include <Fonts/FreeSansBold9pt7b.h>
@@ -59,7 +62,7 @@
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
 
 // Configure CAN TX/RX Pins
-#define CAN_TX GPIO_NUM_23 // This is for 
+#define CAN_TX GPIO_NUM_23 
 #define CAN_RX GPIO_NUM_22
 
 // Pi for circle drawing
@@ -72,6 +75,9 @@ float temp;
 
 void setup() {
   Serial.begin(115200);
+  ElegantOTA.begin(&server);
+
+  
   
 // Initialise CANBus
   Serial.println("Initializing ...");
@@ -129,6 +135,7 @@ void setup() {
 }
 
 void loop() {
+  ElegantOTA.loop();
   CAN_FRAME message;
   if (CAN0.read(message)) {
     printFrame(&message);
