@@ -38,14 +38,24 @@
 // 0x123 BYTE 3 CON 4 STATUS (0 OPEN, 1 CLOSED)
 
 //Include libraries for display and can communications
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
 #include <SPI.h>
 #include <Arduino.h>
 #include <esp32_can.h> // ESP32 native can library
-#include <ElegantOTA.h>
+#include <ElegantOTA.h> //Note: uses library in Async mode. Check documentation here: https://docs.elegantota.pro/async-mode/
+
+const char* ssid = "gaugedriver";
+const char* password = "123456789";
+
+unsigned long ota_progress_millis = 0;
 
 
+AsyncWebServer server(80);
 
 // Include fonts for display
 #include <Fonts/FreeSansBold9pt7b.h>
@@ -75,9 +85,23 @@ float temp;
 
 void setup() {
   Serial.begin(115200);
-  ElegantOTA.begin(&server);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
+  Serial.println("");
 
-  
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Gauge Driver OTA Interface");
+  });
+
+  ElegantOTA.begin(&server);    // Start ElegantOTA
+   // ElegantOTA callbacks
+  ElegantOTA.onStart(onOTAStart);
+  ElegantOTA.onProgress(onOTAProgress);
+  ElegantOTA.onEnd(onOTAEnd);
+
+  server.begin();
+  Serial.println("HTTP server started");
+
   
 // Initialise CANBus
   Serial.println("Initializing ...");
@@ -142,7 +166,6 @@ void loop() {
   }
   }
 
-
 void printFrame(CAN_FRAME *message)
 {
   Serial.print(message->id, HEX);
@@ -161,7 +184,6 @@ void soc_proc(CAN_FRAME *message) {
   printFrame(message);
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
     soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
-
     if(soc > 100) {
       tft.drawRect(0,0,128,100,ST77XX_BLACK);
       tft.fillRect(0,0,128,100,ST77XX_BLACK);
@@ -263,4 +285,28 @@ void delta_proc(CAN_FRAME *message) {
       tft.print("N/A");
     }
   }
+}
+
+void onOTAStart() {
+  // Log when OTA has started
+  Serial.println("OTA update started!");
+  // <Add your own code here>
+}
+
+void onOTAProgress(size_t current, size_t final) {
+  // Log every 1 second
+  if (millis() - ota_progress_millis > 1000) {
+    ota_progress_millis = millis();
+    Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
+  }
+}
+
+void onOTAEnd(bool success) {
+  // Log when OTA has finished
+  if (success) {
+    Serial.println("OTA update finished successfully!");
+  } else {
+    Serial.println("There was an error during OTA update!");
+  }
+  // <Add your own code here>
 }
