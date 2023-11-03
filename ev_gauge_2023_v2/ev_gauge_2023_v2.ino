@@ -37,7 +37,7 @@
 // 0x123 BYTE 2 CON 3 STATUS (0 OPEN, 1 CLOSED)
 // 0x123 BYTE 3 CON 4 STATUS (0 OPEN, 1 CLOSED)
 
-//Include libraries for display and can communications
+//Include libraries for display, OTA and can communications
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <AsyncTCP.h>
@@ -53,7 +53,6 @@ const char* ssid = "gaugedriver";
 const char* password = "123456789";
 
 unsigned long ota_progress_millis = 0;
-
 
 AsyncWebServer server(80);
 
