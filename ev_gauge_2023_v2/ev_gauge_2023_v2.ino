@@ -59,8 +59,8 @@
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
 
 // Configure CAN TX/RX Pins
-#define CAN_TX GPIO_NUM_23 // This is for 
 #define CAN_RX GPIO_NUM_22
+#define CAN_TX GPIO_NUM_23 
 
 // Pi for circle drawing
 float p = 3.1415926;
@@ -168,7 +168,7 @@ void soc_proc(CAN_FRAME *message) {
     } else if(soc) {
       tft.drawRect(0,0,128,100,ST77XX_BLACK);
       tft.fillRect(0,0,128,100,ST77XX_BLACK);
-      tft.setCursor(18,70);
+      tft.setCursor(10,70);
       tft.setFont(&FreeSansBold24pt7b);
       tft.setTextSize(1);
       tft.print(soc);
