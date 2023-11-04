@@ -186,7 +186,7 @@ void soc_proc(CAN_FRAME *message) {
     if(soc > 100) {
       tft.drawRect(0,0,128,100,ST77XX_BLACK);
       tft.fillRect(0,0,128,100,ST77XX_BLACK);
-      tft.setCursor(18,70);
+      tft.setCursor(10,70);
       tft.setFont(&FreeSansBold24pt7b);
       tft.setTextSize(1);
       tft.print("ERR");
@@ -196,7 +196,7 @@ void soc_proc(CAN_FRAME *message) {
     } else if(soc) {
       tft.drawRect(0,0,128,100,ST77XX_BLACK);
       tft.fillRect(0,0,128,100,ST77XX_BLACK);
-      tft.setCursor(18,70);
+      tft.setCursor(10,70);
       tft.setFont(&FreeSansBold24pt7b);
       tft.setTextSize(1);
       tft.print(soc);
