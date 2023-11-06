@@ -1,6 +1,5 @@
 // Canbus-powered information gauge for DIY EV. Designed for Adafruit 1.8in screen powered by ST7755 driver board. Uses SN65HVD canbus transceiver with ESP32 onboard can
 // OTA updating for software in case the driver is buried in your dash
-// NOTE: Not working in this version for unknown reasons!
 
 //Include libraries for display, OTA and can communications
 #include <WiFi.h>
