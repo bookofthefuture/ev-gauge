@@ -1,41 +1,6 @@
-
-// TFT Connections: 30 Pin
-// SDA: GPIO23
-// SCL: GPIO18 
-// CS   GPIO5
-// RST: GPIO4
-// RS/DC:  GPIO2
-// BLK 3v3 (Backlight)
-
-// CAN_RXD = ESP32 – IO26
-// CAN_TXD = ESP32 – IO25
-
-// TFT Connections: 38 Pin
-// SCL: GPIO13
-// SDA: GPIO12
-// RS/DC:  GPIO27
-// RST: GPIO14
-// CS   GPI26
-// BLK 3v3 (Backlight)
-
-// CAN_RXD = ESP32 – IO22
-// CAN_TXD = ESP32 – IO23
-
-// SIMPBMS CANBUS SIGNALS
-// 0x355 BYTE 0 SOC LSB SCALE 1
-// 0x355 BYTE 1 SOC MSB SCALE 1
-// 0x356 BYTE 4 TEMP LSB SCALE 0.1
-// 0x356 BYTE 5 TEMP MSB SCALE 0.1
-// 0x373 BYTE 0 Min Cell Voltage LSB
-// 0x373 BYTE 1 Min Cell Voltage MSB
-// 0x373 BYTE 2 Max Cell Voltage LSB
-// 0x373 BYTE 3 Max Cell Voltage MSB
-
-// CONTACTOR STATUS CAN (TBC)
-// 0x123 BYTE 0 CON 1 STATUS (0 OPEN, 1 CLOSED)
-// 0x123 BYTE 1 CON 2 STATUS (0 OPEN, 1 CLOSED)
-// 0x123 BYTE 2 CON 3 STATUS (0 OPEN, 1 CLOSED)
-// 0x123 BYTE 3 CON 4 STATUS (0 OPEN, 1 CLOSED)
+// Canbus-powered information gauge for DIY EV. Designed for Adafruit 1.8in screen powered by ST7755 driver board. Uses SN65HVD canbus transceiver with ESP32 onboard can
+// OTA updating for software in case the driver is buried in your dash
+// NOTE: Not working in this version for unknown reasons!
 
 //Include libraries for display, OTA and can communications
 #include <WiFi.h>
@@ -47,7 +12,7 @@
 #include <SPI.h>
 #include <Arduino.h>
 #include <esp32_can.h> // ESP32 native can library
-#include <ElegantOTA.h> //Note: uses library in Async mode. Check documentation here: https://docs.elegantota.pro/async-mode/
+#include <ElegantOTA.h> //Note: uses library in Async mode. Check documentation here: https://docs.elegantota.pro/async-mode/. Modification needed to library for this to work.
 
 const char* ssid = "gaugedriver";
 const char* password = "123456789";
@@ -62,17 +27,33 @@ AsyncWebServer server(80);
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
 
-// Configure i2c pins for display
-#define TFT_SDA        23        
-#define TFT_SCL        18
-#define TFT_CS         5
-#define TFT_RST        4
-#define TFT_DC         2
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
+//#define ESP38_PIN 1 // Set this to 1 if using a 38 pin esp32 module
 
-// Configure CAN TX/RX Pins
-#define CAN_TX GPIO_NUM_25
-#define CAN_RX GPIO_NUM_26
+#ifdef ESP38_PIN
+  // Configure i2c pins for display - 38 pin layout
+  #define TFT_SDA        12        
+  #define TFT_SCL        13
+  #define TFT_CS         26
+  #define TFT_RST        14
+  #define TFT_DC         27
+  Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
+  // Configure CAN TX/RX Pins
+  #define CAN_TX GPIO_NUM_23
+  #define CAN_RX GPIO_NUM_22
+#else 
+  #define ESP38_PIN 0
+  // Configure i2c pins for display - 30 pin layout
+  #define TFT_SDA        23      
+  #define TFT_SCL        18
+  #define TFT_CS         5
+  #define TFT_RST        4
+  #define TFT_DC         2
+  Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
+
+  // Configure CAN TX/RX Pins
+  #define CAN_TX GPIO_NUM_25
+  #define CAN_RX GPIO_NUM_26
+#endif
 
 // Pi for circle drawing
 float p = 3.1415926;
@@ -84,6 +65,14 @@ float temp;
 
 void setup() {
   Serial.begin(115200);
+
+  if (ESP38_PIN == 0) {
+    Serial.println("Configured for 30 Pin ESP32 Dev Module");
+    } else if (ESP38_PIN == 1) {
+    Serial.println("Configured for 38 Pin ESP32 Dev Module");
+    } else {
+    Serial.println("Pinout configuration error");     
+    }
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
   Serial.println("");
@@ -104,7 +93,7 @@ void setup() {
   
 // Initialise CANBus
   Serial.println("Initializing ...");
-  CAN0.setCANPins(CAN_TX, CAN_RX);
+  CAN0.setCANPins(CAN_RX, CAN_TX);
   CAN0.begin(500000);
   pinMode(TFT_RST, OUTPUT);
 
