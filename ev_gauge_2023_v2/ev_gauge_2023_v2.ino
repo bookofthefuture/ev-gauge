@@ -1,10 +1,10 @@
 
 // TFT Connections: 30 Pin
-// SCL: GPIO18 
 // SDA: GPIO23
-// RS/DC:  GPIO2
-// RST: GPIO4
+// SCL: GPIO18 
 // CS   GPIO5
+// RST: GPIO4
+// RS/DC:  GPIO2
 // BLK 3v3 (Backlight)
 
 // CAN_RXD = ESP32 – IO26
@@ -63,16 +63,16 @@ AsyncWebServer server(80);
 #include <Fonts/FreeSansBold24pt7b.h>
 
 // Configure i2c pins for display
-#define TFT_SDA        12        
-#define TFT_SCL        13
-#define TFT_CS         26
-#define TFT_RST        14
-#define TFT_DC         27
+#define TFT_SDA        23        
+#define TFT_SCL        18
+#define TFT_CS         5
+#define TFT_RST        4
+#define TFT_DC         2
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
 
 // Configure CAN TX/RX Pins
-#define CAN_TX GPIO_NUM_22 
-#define CAN_RX GPIO_NUM_23
+#define CAN_TX GPIO_NUM_25
+#define CAN_RX GPIO_NUM_26
 
 // Pi for circle drawing
 float p = 3.1415926;
@@ -100,7 +100,7 @@ void setup() {
 
   server.begin();
   Serial.println("HTTP server started");
-
+  delay(4000);
   
 // Initialise CANBus
   Serial.println("Initializing ...");
