@@ -1,5 +1,6 @@
 // Canbus-powered information gauge for DIY EV. Designed for Adafruit 1.8in screen powered by ST7755 driver board. Uses SN65HVD canbus transceiver with ESP32 onboard can
 // OTA updating for software in case the driver is buried in your dash
+// Now with added canbus signalling to control analogue gauges and delete error messages in car
 
 //Include libraries for display, OTA and can communications
 #include <WiFi.h>
@@ -13,10 +14,28 @@
 #include <esp32_can.h> // ESP32 native can library
 #include <ElegantOTA.h> //Note: uses library in Async mode. Check documentation here: https://docs.elegantota.pro/async-mode/. Modification needed to library for this to work.
 
+// #define DEBUG = TRUE
+// #define ESP38_PIN 1 // Set this to 1 if using a 38 pin esp32 module
+
+// OTA CONFIG
 const char* ssid = "gaugedriver";
 const char* password = "123456789";
 
 unsigned long ota_progress_millis = 0;
+
+// GAUGE CONFIG
+CAN_FRAME txFrame;
+unsigned long lastMillis;
+int motorSpeed = 0; // If I can get canbus comms running from inverter, can get revs from here
+int clusterStart = 1; // maxes the rev counter dial on start-up
+int motorTemp = 0; // need inverter can comms to get this but could use charger temp as proxy for now
+int mt;
+int revCount;
+int counter_329 = 0;
+int brakeOn = 0;
+unsigned char accelPot = 0x00;
+unsigned char ABSMsg = 0x11; // This is recalculated on a timer so no input needed here
+
 
 AsyncWebServer server(80);
 
@@ -26,7 +45,6 @@ AsyncWebServer server(80);
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
 
-//#define ESP38_PIN 1 // Set this to 1 if using a 38 pin esp32 module
 
 #ifdef ESP38_PIN
   // Configure i2c pins for display - 38 pin layout
@@ -63,8 +81,8 @@ int delta;
 float temp;
 
 void setup() {
+#ifdef DEBUG
   Serial.begin(115200);
-
   if (ESP38_PIN == 0) {
     Serial.println("Configured for 30 Pin ESP32 Dev Module");
     } else if (ESP38_PIN == 1) {
@@ -72,6 +90,7 @@ void setup() {
     } else {
     Serial.println("Pinout configuration error");     
     }
+#endif
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
   Serial.println("");
@@ -87,11 +106,15 @@ void setup() {
   ElegantOTA.onEnd(onOTAEnd);
 
   server.begin();
+#ifdef DEBUG
   Serial.println("HTTP server started");
+#endif
   delay(4000);
   
 // Initialise CANBus
+#ifdef DEBUG
   Serial.println("Initializing ...");
+#endif
   CAN0.setCANPins(CAN_RX, CAN_TX);
   CAN0.begin(500000);
   pinMode(TFT_RST, OUTPUT);
@@ -103,7 +126,9 @@ void setup() {
   tft.setRotation(2);
   tft.fillScreen(ST77XX_BLACK);
 
+#ifdef DEBUG
   Serial.println("Ready ...!");
+#endif
 
   // Set up can filters for target IDs
   CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
@@ -147,11 +172,21 @@ void setup() {
 
 void loop() {
   ElegantOTA.loop();
+
+#ifdef DEBUG
   CAN_FRAME message;
   if (CAN0.read(message)) {
     printFrame(&message);
   }
+#endif
+
+  if (millis() - lastMillis >= 25) {
+   lastMillis = millis();  //get ready for the next iteration
+   eml();
+   eng_speed();
+   asc();
   }
+}
 
 void printFrame(CAN_FRAME *message)
 {
@@ -272,6 +307,66 @@ void delta_proc(CAN_FRAME *message) {
       tft.print("N/A");
     }
   }
+}
+
+void eml(){
+  txFrame.rtr = 0;  
+  txFrame.id = 0x545;
+  txFrame.length = 8;
+  txFrame.extended = false;
+  txFrame.data.uint8[0] = 0;//2-cel 16-eml 
+  txFrame.data.uint8[1] = 0x00;
+  txFrame.data.uint8[2] = 0x00;
+  txFrame.data.uint8[3] = 0;//overheat(8)
+  txFrame.data.uint8[4] = 0x7e;
+  txFrame.data.uint8[5] = 10;
+  txFrame.data.uint8[6] = 0;
+  txFrame.data.uint8[7] = 18;
+  CAN0.sendFrame(txFrame);
+}
+
+void eng_speed() {
+  revCount = map(motorSpeed,0,10000,0 ,44800);
+  if (clusterStart == 0) {revCount = 4800;}
+  if (revCount <= 4800) {revCount = 4800;}
+  if (revCount >= 44800) {revCount = 44800;}
+  if (clusterStart == 1) {revCount = 44800; clusterStart = 0;}
+
+  txFrame.rtr = 0;
+  txFrame.length = 8;
+  txFrame.extended = false;
+  txFrame.data.uint8[0] = 13;//bit 0 should be 1
+  txFrame.data.uint8[1] = 0;
+  txFrame.data.uint8[2] = lowByte(revCount);//eng speed lsb
+  txFrame.data.uint8[3] = highByte(revCount);//eng speed msb
+  txFrame.data.uint8[4] = 0;
+  txFrame.data.uint8[5] = 0;
+  txFrame.data.uint8[6] = 0;
+  txFrame.data.uint8[7] = 0;
+  CAN0.sendFrame(txFrame);
+}
+
+void asc() {
+  if(counter_329 >= 22) {counter_329 = 0;}
+  if(counter_329 == 0) { ABSMsg=0x11;}
+  if(counter_329 >= 8 && counter_329 < 15) {ABSMsg=0x86;}
+  if(counter_329 >= 15) {ABSMsg=0xd9;}
+  counter_329++;
+
+  mt=map(motorTemp,0,40,90,254);
+
+  txFrame.id  = 0x329;
+  txFrame.length = 8;
+  txFrame.extended = false;
+  txFrame.data.uint8[0] = ABSMsg;
+  txFrame.data.uint8[1] = mt;//motor temp 48-255 full scale
+  txFrame.data.uint8[2] = 0xc5;
+  txFrame.data.uint8[3] = 0;//engine status bit4 ,clutch bit0,engine run bit3,ack can bit2
+  txFrame.data.uint8[4] = 0;
+  txFrame.data.uint8[5] = accelPot;//throttle position 00-FE
+  txFrame.data.uint8[6] = brakeOn;//bit 0 brake on
+  txFrame.data.uint8[7] = 0x0;
+  CAN0.sendFrame(txFrame);
 }
 
 void onOTAStart() {
