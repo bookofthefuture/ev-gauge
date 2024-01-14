@@ -30,11 +30,11 @@ AsyncWebServer server(80);
 
 #ifdef ESP38_PIN
   // Configure i2c pins for display - 38 pin layout
-  #define TFT_SDA        12 // PURPLE
-  #define TFT_SCL        13 // GREY       
-  #define TFT_CS         26 // YELLOW
-  #define TFT_RST        14 // BLUE
-  #define TFT_DC         27 // GREEN
+  #define TFT_SDA        12        
+  #define TFT_SCL        13
+  #define TFT_CS         26
+  #define TFT_RST        14
+  #define TFT_DC         27
   Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
   // Configure CAN TX/RX Pins
   #define CAN_TX GPIO_NUM_23
@@ -42,11 +42,11 @@ AsyncWebServer server(80);
 #else 
   #define ESP38_PIN 0
   // Configure i2c pins for display - 30 pin layout
-  #define TFT_SDA        23 // PURPLE  
-  #define TFT_SCL        18 // GREY
-  #define TFT_CS         5  // YELLOW
-  #define TFT_RST        4  // BLUE
-  #define TFT_DC         2  // GREEN
+  #define TFT_SDA        23      
+  #define TFT_SCL        18
+  #define TFT_CS         5
+  #define TFT_RST        4
+  #define TFT_DC         2
   Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
 
   // Configure CAN TX/RX Pins
