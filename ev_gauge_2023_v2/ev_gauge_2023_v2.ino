@@ -1,6 +1,7 @@
 // Canbus-powered information gauge for DIY EV. Designed for Adafruit 1.8in screen powered by ST7755 driver board. Uses SN65HVD canbus transceiver with ESP32 onboard can
 // OTA updating for software in case the driver is buried in your dash
 // Now with added canbus signalling to control analogue gauges and delete error messages in car
+// adding code to read and display information from outlander heater controller - NOT TESTED!!
 
 //Include libraries for display, OTA and can communications
 #include <WiFi.h>
@@ -36,6 +37,13 @@ int brakeOn = 0;
 unsigned char accelPot = 0x00;
 unsigned char ABSMsg = 0x11; // This is recalculated on a timer so no input needed here
 
+// HEATER DATA
+bool hvPresent = false;
+bool heating = false;
+unsigned char templsb;
+unsigned char tempmsb;
+unsigned char targetlsb;
+unsigned char targetmsb;
 
 AsyncWebServer server(80);
 
@@ -133,14 +141,16 @@ void setup() {
   // Set up can filters for target IDs
   CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
   CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
-  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas  
+  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
+  CAN0.watchFor(0x300, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
   //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
 
   // Set callbacks for target IDs to process and update display
   CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
   CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
   CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
- 
+  CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
+   
   // Initial display of SoC before data arrives
 //  tft.setFont(&FreeSansBold24pt7b);
 //  tft.setCursor(20, 70);
@@ -306,6 +316,68 @@ void delta_proc(CAN_FRAME *message) {
       tft.setTextSize(1);
       tft.print("N/A");
     }
+  }
+}
+
+void heater_proc(CAN_FRAME *message)  {
+  printFrame(message); 
+  if(message->data.byte[0] != hvPresent || message->data.byte[2] != heating || message->data.byte[3] != templsb || message->data.byte[4] != tempmsb || message->data.byte[5] != targetlsb || message->data.byte[6] != targetmsb) {
+    message->data.byte[0] = hvPresent; // HV Present
+    message->data.byte[2] = heating; // Heater active
+    message->data.byte[3] = templsb; // Water Temp low bit
+    message->data.byte[4] = tempmsb; // Water temp high bit
+    message->data.byte[5] = targetlsb; // Target temp low bit
+    message->data.byte[6] = targetmsb; // Target temp high bit
+    int temp = (int)(((unsigned)tempmsb << 8) | templsb ); //test reconstruction - note doesn't handle negative numbers
+    int target = (int)(((unsigned)targetmsb << 8) | targetlsb ); //test reconstruction - note doesn't handle negative numbers
+    
+    Serial.println("Heater Status");
+    Serial.print("HV Present: ");
+    Serial.print(hvPresent);
+    Serial.print(" Heater Active: ");
+    Serial.print(heating);
+    Serial.print(" Water Temperature: ");
+    Serial.print(temp);
+    Serial.println("C");
+    Serial.println("");
+    Serial.println("Settings");
+    Serial.print(" Heating: ");
+    Serial.print(heating);
+    Serial.print(" Desired Water Temperature: ");
+    Serial.print(target);
+    Serial.println("");
+    Serial.println(""); 
+
+  // clear screen if new data
+  tft.drawRect(0,0,128,10,ST77XX_BLACK);
+  tft.fillRect(0,0,128,10,ST77XX_BLACK);
+  
+  // top row do HV (red or green if enabled) HEAT (red or green if active) TAR (target temp) TMP (actual)
+  tft.setCursor(0,0);
+  tft.setFont(&FreeSansBold9pt7b);
+  tft.setTextSize(1);
+  if(hvPresent){
+      tft.setTextColor(ST77XX_GREEN);  
+  } else {
+      tft.setTextColor(ST77XX_RED);  
+    }
+  tft.print("HV");  
+  tft.setCursor(30, 0);
+  if(heating){
+      tft.setTextColor(ST77XX_GREEN);  
+  } else {
+      tft.setTextColor(ST77XX_RED);  
+    }
+  tft.print("HEAT");  
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(60, 0);
+  tft.print("TAR");  
+  tft.setCursor(70, 0);  
+  tft.print(target);  
+  tft.setCursor(90, 0);  
+  tft.print("TMP");  
+  tft.setCursor(100, 0);  
+  tft.print(temp);  
   }
 }
 
