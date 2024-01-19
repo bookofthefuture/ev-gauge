@@ -1,6 +1,8 @@
 // Canbus-powered information gauge for DIY EV. Designed for Adafruit 1.8in screen powered by ST7755 driver board. Uses SN65HVD canbus transceiver with ESP32 onboard can
 // OTA updating for software in case the driver is buried in your dash
 // Now with added canbus signalling to control analogue gauges and delete error messages in car
+// adding code to read and display information from outlander heater controller - NOT TESTED!!
+// adding dual displays
 
 //Include libraries for display, OTA and can communications
 #include <WiFi.h>
@@ -15,7 +17,6 @@
 #include <ElegantOTA.h> //Note: uses library in Async mode. Check documentation here: https://docs.elegantota.pro/async-mode/. Modification needed to library for this to work.
 
 // #define DEBUG = TRUE
-// #define ESP38_PIN 1 // Set this to 1 if using a 38 pin esp32 module
 
 // OTA CONFIG
 const char* ssid = "gaugedriver";
@@ -36,6 +37,13 @@ int brakeOn = 0;
 unsigned char accelPot = 0x00;
 unsigned char ABSMsg = 0x11; // This is recalculated on a timer so no input needed here
 
+// HEATER DATA
+bool hvPresent = false;
+bool heating = false;
+unsigned char templsb;
+unsigned char tempmsb;
+unsigned char targetlsb;
+unsigned char targetmsb;
 
 AsyncWebServer server(80);
 
@@ -45,32 +53,25 @@ AsyncWebServer server(80);
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
 
+// Configure i2c pins for display - 30 pin layout
+// Note change of layout to make wiring simpler
 
-#ifdef ESP38_PIN
-  // Configure i2c pins for display - 38 pin layout
-  #define TFT_SDA        12        
-  #define TFT_SCL        13
-  #define TFT_CS         26
-  #define TFT_RST        14
-  #define TFT_DC         27
-  Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
-  // Configure CAN TX/RX Pins
-  #define CAN_TX GPIO_NUM_23
-  #define CAN_RX GPIO_NUM_22
-#else 
-  #define ESP38_PIN 0
-  // Configure i2c pins for display - 30 pin layout
-  #define TFT_SDA        23      
-  #define TFT_SCL        18
-  #define TFT_CS         5
-  #define TFT_RST        4
-  #define TFT_DC         2
-  Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
+//BLK (backlight) connect to 3v3 output
+//3v3
+//GND
+#define TFT_RST        15
+#define TFT_SDA        2      
+#define TFT_SCL        4
+#define TFT_DC         16 // labelled as RX2
+#define TFT_1_CS       17 // labelled as TX_2
+#define TFT_2_CS       5 // break track and bridge across
 
-  // Configure CAN TX/RX Pins
-  #define CAN_TX GPIO_NUM_25
-  #define CAN_RX GPIO_NUM_26
-#endif
+Adafruit_ST7735 tft1 = Adafruit_ST7735(TFT_1_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
+Adafruit_ST7735 tft2 = Adafruit_ST7735(TFT_2_CS, TFT_DC, TFT_SDA, TFT_SCL, -1);
+
+// Configure CAN TX/RX Pins
+#define CAN_RX GPIO_NUM_19
+#define CAN_TX GPIO_NUM_21
 
 // Pi for circle drawing
 float p = 3.1415926;
@@ -120,11 +121,11 @@ void setup() {
   pinMode(TFT_RST, OUTPUT);
 
 // Initialise 1.8" TFT screen:
-  tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-  tft.setTextWrap(false);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setRotation(2);
-  tft.fillScreen(ST77XX_BLACK);
+  tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+  tft1.setTextWrap(false);
+  tft1.setTextColor(ST77XX_WHITE);
+  tft1.setRotation(2);
+  tft1.fillScreen(ST77XX_BLACK);
 
 #ifdef DEBUG
   Serial.println("Ready ...!");
@@ -133,40 +134,59 @@ void setup() {
   // Set up can filters for target IDs
   CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
   CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
-  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas  
+  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
+  CAN0.watchFor(0x300, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
   //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
 
   // Set callbacks for target IDs to process and update display
   CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
   CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
   CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
- 
+  CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
+   
   // Initial display of SoC before data arrives
-//  tft.setFont(&FreeSansBold24pt7b);
-//  tft.setCursor(20, 70);
-//  tft.setTextSize(1);
-  tft.setFont(&FreeSansBold9pt7b);
-  tft.setCursor(10, 70);
-  tft.setTextSize(1);
-  tft.print("Waiting for");
-  tft.setCursor(10, 90);
-  tft.print("CAN...");
+  tft1.setCursor(0,9);
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextSize(1);
+  tft1.setTextColor(ST77XX_RED);  
+  tft1.print("HV");  
+  tft1.setCursor(30,15);
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextSize(1);
+  tft1.setTextColor(ST77XX_RED);  
+  tft1.print("HE");  
+  tft1.setCursor(60,15);
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextSize(1);
+  tft1.setTextColor(ST77XX_WHITE);  
+  tft1.print("TAR");  
+
+
+//  tft1.setFont(&FreeSansBold24pt7b);
+//  tft1.setCursor(20, 70);
+//  tft1.setTextSize(1);
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setCursor(10, 70);
+  tft1.setTextSize(1);
+  tft1.print("Waiting for");
+  tft1.setCursor(10, 90);
+  tft1.print("CAN...");
    
   // Initial display of max delta before data arrives
-  tft.fillTriangle(68, 154, 74, 135, 80, 154, ST77XX_BLUE);
-  tft.setCursor(84, 153);
-  tft.setFont(&FreeSansBold12pt7b);
-  tft.setTextSize(1);
-  tft.print("N/A");
+  tft1.fillTriangle(68, 154, 74, 135, 80, 154, ST77XX_BLUE);
+  tft1.setCursor(84, 153);
+  tft1.setFont(&FreeSansBold12pt7b);
+  tft1.setTextSize(1);
+  tft1.print("N/A");
 
   // Initial display of module temp before data arrives
-  tft.fillCircle(8, 140, 2, ST77XX_RED);
-  tft.fillCircle(8, 150, 4, ST77XX_RED);
-  tft.fillRect(6, 140, 5, 6, ST77XX_RED);
-  tft.setCursor(16, 153);
-  tft.setFont(&FreeSansBold12pt7b);
-  tft.setTextSize(1);
-  tft.print("N/A");
+  tft1.fillCircle(8, 140, 2, ST77XX_RED);
+  tft1.fillCircle(8, 150, 4, ST77XX_RED);
+  tft1.fillRect(6, 140, 5, 6, ST77XX_RED);
+  tft1.setCursor(16, 153);
+  tft1.setFont(&FreeSansBold12pt7b);
+  tft1.setTextSize(1);
+  tft1.print("N/A");
  
 }
 
@@ -207,31 +227,31 @@ void soc_proc(CAN_FRAME *message) {
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
     soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
     if(soc > 100) {
-      tft.drawRect(0,0,128,100,ST77XX_BLACK);
-      tft.fillRect(0,0,128,100,ST77XX_BLACK);
-      tft.setCursor(10,70);
-      tft.setFont(&FreeSansBold24pt7b);
-      tft.setTextSize(1);
-      tft.print("ERR");
+      tft1.drawRect(0,0,128,100,ST77XX_BLACK);
+      tft1.fillRect(0,0,128,100,ST77XX_BLACK);
+      tft1.setCursor(10,70);
+      tft1.setFont(&FreeSansBold24pt7b);
+      tft1.setTextSize(1);
+      tft1.print("ERR");
       printf("SoC error >> SoC: ");
       printf("%d%%", soc);
       printf("/n");            
     } else if(soc) {
-      tft.drawRect(0,0,128,100,ST77XX_BLACK);
-      tft.fillRect(0,0,128,100,ST77XX_BLACK);
-      tft.setCursor(10,70);
-      tft.setFont(&FreeSansBold24pt7b);
-      tft.setTextSize(1);
-      tft.print(soc);
-      tft.print("%");
+      tft1.drawRect(0,0,128,100,ST77XX_BLACK);
+      tft1.fillRect(0,0,128,100,ST77XX_BLACK);
+      tft1.setCursor(10,70);
+      tft1.setFont(&FreeSansBold24pt7b);
+      tft1.setTextSize(1);
+      tft1.print(soc);
+      tft1.print("%");
       printf("SoC: ");
       printf("%d%%", soc);
       printf("\n");      
     } else {
-      tft.setCursor(18,70);
-      tft.setFont(&FreeSansBold24pt7b);
-      tft.setTextSize(2);
-      tft.print("N/A");
+      tft1.setCursor(18,70);
+      tft1.setFont(&FreeSansBold24pt7b);
+      tft1.setTextSize(2);
+      tft1.print("N/A");
     }  
   }
 }
@@ -242,32 +262,32 @@ void temp_proc(CAN_FRAME *message) {
     temp = (message->data.byte[4] + (message->data.byte[5] <<8))/10;  
     // Module Temp
     if(temp > 150) {
-      tft.drawRect(13,120,51,40,ST77XX_BLACK);
-      tft.fillRect(13,120,51,40,ST77XX_BLACK);
-      tft.setCursor(16, 153);
-      tft.setFont(&FreeSansBold9pt7b);
-      tft.setTextSize(1);
-      tft.print("ERR");
+      tft1.drawRect(13,120,51,40,ST77XX_BLACK);
+      tft1.fillRect(13,120,51,40,ST77XX_BLACK);
+      tft1.setCursor(16, 153);
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.setTextSize(1);
+      tft1.print("ERR");
       printf("Temp error >> Temp: ");
       printf("%d%%", temp);
       printf("/n");
   } else if(temp) {
-      tft.drawRect(13,120,51,40,ST77XX_BLACK);
-      tft.fillRect(13,120,51,40,ST77XX_BLACK);
-      tft.setCursor(16, 153);
-      tft.setFont(&FreeSansBold9pt7b);
-      tft.setTextSize(1);
-      tft.print(temp);
+      tft1.drawRect(13,120,51,40,ST77XX_BLACK);
+      tft1.fillRect(13,120,51,40,ST77XX_BLACK);
+      tft1.setCursor(16, 153);
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.setTextSize(1);
+      tft1.print(temp);
       printf("Temp: ");
       printf("%d%%", temp);
       printf("/n");
     } else {
-      tft.drawRect(13,120,51,40,ST77XX_BLACK);
-      tft.fillRect(13,120,51,40,ST77XX_BLACK);
-      tft.setCursor(16, 153);
-      tft.setFont(&FreeSansBold9pt7b);
-      tft.setTextSize(1);
-      tft.print("N/A");
+      tft1.drawRect(13,120,51,40,ST77XX_BLACK);
+      tft1.fillRect(13,120,51,40,ST77XX_BLACK);
+      tft1.setCursor(16, 153);
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.setTextSize(1);
+      tft1.print("N/A");
     }
   }
 }
@@ -278,34 +298,96 @@ void delta_proc(CAN_FRAME *message) {
     delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
   // Max Delta
     if(delta < 0) {
-      tft.drawRect(80,120,48,40,ST77XX_BLACK);
-      tft.fillRect(80,120,48,40,ST77XX_BLACK);
-      tft.setCursor(84, 153);
-      tft.setFont(&FreeSansBold9pt7b);
-      tft.setTextSize(1);
-      tft.print("ERR");
+      tft1.drawRect(80,120,48,40,ST77XX_BLACK);
+      tft1.fillRect(80,120,48,40,ST77XX_BLACK);
+      tft1.setCursor(84, 153);
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.setTextSize(1);
+      tft1.print("ERR");
       printf("Delta error >> Delta: ");
       printf("%d%%", delta);
       printf("/n");    
     } else if(delta) {
-      tft.drawRect(80,120,48,40,ST77XX_BLACK);
-      tft.fillRect(80,120,48,40,ST77XX_BLACK);
-      tft.setCursor(84, 153);
-      tft.setFont(&FreeSansBold9pt7b);
-      tft.setTextSize(1);
-      tft.print(delta);
-//      tft.print("mV");
+      tft1.drawRect(80,120,48,40,ST77XX_BLACK);
+      tft1.fillRect(80,120,48,40,ST77XX_BLACK);
+      tft1.setCursor(84, 153);
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.setTextSize(1);
+      tft1.print(delta);
+//      tft1.print("mV");
       printf("Delta: ");
       printf("%d%%", delta);
       printf("/n");    
     } else {
-      tft.drawRect(80,120,48,40,ST77XX_BLACK);
-      tft.fillRect(80,120,48,40,ST77XX_BLACK);
-      tft.setCursor(84, 153);
-      tft.setFont(&FreeSansBold9pt7b);
-      tft.setTextSize(1);
-      tft.print("N/A");
+      tft1.drawRect(80,120,48,40,ST77XX_BLACK);
+      tft1.fillRect(80,120,48,40,ST77XX_BLACK);
+      tft1.setCursor(84, 153);
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.setTextSize(1);
+      tft1.print("N/A");
     }
+  }
+}
+
+void heater_proc(CAN_FRAME *message)  {
+  printFrame(message); 
+  if(message->data.byte[0] != hvPresent || message->data.byte[2] != heating || message->data.byte[3] != templsb || message->data.byte[4] != tempmsb || message->data.byte[5] != targetlsb || message->data.byte[6] != targetmsb) {
+    message->data.byte[0] = hvPresent; // HV Present
+    message->data.byte[2] = heating; // Heater active
+    message->data.byte[3] = templsb; // Water Temp low bit
+    message->data.byte[4] = tempmsb; // Water temp high bit
+    message->data.byte[5] = targetlsb; // Target temp low bit
+    message->data.byte[6] = targetmsb; // Target temp high bit
+    int temp = (int)(((unsigned)tempmsb << 8) | templsb ); //test reconstruction - note doesn't handle negative numbers
+    int target = (int)(((unsigned)targetmsb << 8) | targetlsb ); //test reconstruction - note doesn't handle negative numbers
+    
+    Serial.println("Heater Status");
+    Serial.print("HV Present: ");
+    Serial.print(hvPresent);
+    Serial.print(" Heater Active: ");
+    Serial.print(heating);
+    Serial.print(" Water Temperature: ");
+    Serial.print(temp);
+    Serial.println("C");
+    Serial.println("");
+    Serial.println("Settings");
+    Serial.print(" Heating: ");
+    Serial.print(heating);
+    Serial.print(" Desired Water Temperature: ");
+    Serial.print(target);
+    Serial.println("");
+    Serial.println(""); 
+
+  // clear screen if new data
+  tft1.drawRect(0,0,128,10,ST77XX_BLACK);
+  tft1.fillRect(0,0,128,10,ST77XX_BLACK);
+  
+  // top row do HV (red or green if enabled) HEAT (red or green if active) TAR (target temp) TMP (actual)
+  tft1.setCursor(0,0);
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextSize(1);
+  if(hvPresent){
+      tft1.setTextColor(ST77XX_GREEN);  
+  } else {
+      tft1.setTextColor(ST77XX_RED);  
+    }
+  tft1.print("HV");  
+  tft1.setCursor(30, 0);
+  if(heating){
+      tft1.setTextColor(ST77XX_GREEN);  
+  } else {
+      tft1.setTextColor(ST77XX_RED);  
+    }
+  tft1.print("HEAT");  
+  tft1.setTextColor(ST77XX_WHITE);
+  tft1.setCursor(60, 0);
+  tft1.print("TAR");  
+  tft1.setCursor(70, 0);  
+  tft1.print(target);  
+  tft1.setCursor(90, 0);  
+  tft1.print("TMP");  
+  tft1.setCursor(100, 0);  
+  tft1.print(temp);  
   }
 }
 
