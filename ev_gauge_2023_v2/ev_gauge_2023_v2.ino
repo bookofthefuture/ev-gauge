@@ -152,6 +152,19 @@ void setup() {
   CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
    
   // Initial display of SoC before data arrives
+  tft.setCursor(0,9);
+  tft.setFont(&FreeSansBold9pt7b);
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_RED);  
+  tft.print("HV");  
+  tft.setCursor(30, 15);
+  tft.print("HE");  
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(60, 15);  
+  tft.print("TGT");  
+  tft.setCursor(90, 15);  
+  tft.print("TMP");  
+  
 //  tft.setFont(&FreeSansBold24pt7b);
 //  tft.setCursor(20, 70);
 //  tft.setTextSize(1);
@@ -217,8 +230,8 @@ void soc_proc(CAN_FRAME *message) {
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
     soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
     if(soc > 100) {
-      tft.drawRect(0,0,128,100,ST77XX_BLACK);
-      tft.fillRect(0,0,128,100,ST77XX_BLACK);
+      tft.drawRect(0,16,128,100,ST77XX_BLACK);
+      tft.fillRect(0,16,128,100,ST77XX_BLACK);
       tft.setCursor(10,70);
       tft.setFont(&FreeSansBold24pt7b);
       tft.setTextSize(1);
@@ -227,8 +240,8 @@ void soc_proc(CAN_FRAME *message) {
       printf("%d%%", soc);
       printf("/n");            
     } else if(soc) {
-      tft.drawRect(0,0,128,100,ST77XX_BLACK);
-      tft.fillRect(0,0,128,100,ST77XX_BLACK);
+      tft.drawRect(0,16,128,100,ST77XX_BLACK);
+      tft.fillRect(0,16,128,100,ST77XX_BLACK);
       tft.setCursor(10,70);
       tft.setFont(&FreeSansBold24pt7b);
       tft.setTextSize(1);
@@ -353,7 +366,7 @@ void heater_proc(CAN_FRAME *message)  {
   tft.fillRect(0,0,128,10,ST77XX_BLACK);
   
   // top row do HV (red or green if enabled) HEAT (red or green if active) TAR (target temp) TMP (actual)
-  tft.setCursor(0,0);
+  tft.setCursor(0,9);
   tft.setFont(&FreeSansBold9pt7b);
   tft.setTextSize(1);
   if(hvPresent){
@@ -362,21 +375,17 @@ void heater_proc(CAN_FRAME *message)  {
       tft.setTextColor(ST77XX_RED);  
     }
   tft.print("HV");  
-  tft.setCursor(30, 0);
+  tft.setCursor(30, 15);
   if(heating){
       tft.setTextColor(ST77XX_GREEN);  
   } else {
       tft.setTextColor(ST77XX_RED);  
     }
-  tft.print("HEAT");  
+  tft.print("HE");  
   tft.setTextColor(ST77XX_WHITE);
-  tft.setCursor(60, 0);
-  tft.print("TAR");  
-  tft.setCursor(70, 0);  
+  tft.setCursor(60, 15);  
   tft.print(target);  
-  tft.setCursor(90, 0);  
-  tft.print("TMP");  
-  tft.setCursor(100, 0);  
+  tft.setCursor(90, 15);  
   tft.print(temp);  
   }
 }
