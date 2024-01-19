@@ -227,8 +227,8 @@ void soc_proc(CAN_FRAME *message) {
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
     soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
     if(soc > 100) {
-      tft1.drawRect(0,0,128,100,ST77XX_BLACK);
-      tft1.fillRect(0,0,128,100,ST77XX_BLACK);
+      tft1.drawRect(0,16,128,100,ST77XX_BLACK);
+      tft1.fillRect(0,16,128,100,ST77XX_BLACK);
       tft1.setCursor(10,70);
       tft1.setFont(&FreeSansBold24pt7b);
       tft1.setTextSize(1);
@@ -237,8 +237,8 @@ void soc_proc(CAN_FRAME *message) {
       printf("%d%%", soc);
       printf("/n");            
     } else if(soc) {
-      tft1.drawRect(0,0,128,100,ST77XX_BLACK);
-      tft1.fillRect(0,0,128,100,ST77XX_BLACK);
+      tft1.drawRect(0,16,128,100,ST77XX_BLACK);
+      tft1.fillRect(0,16,128,100,ST77XX_BLACK);
       tft1.setCursor(10,70);
       tft1.setFont(&FreeSansBold24pt7b);
       tft1.setTextSize(1);
