@@ -142,7 +142,7 @@ void setup() {
   CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
   CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
   CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
-  CAN0.watchFor(0x300, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
+  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
   //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
 
   // Set callbacks for target IDs to process and update display
@@ -235,7 +235,7 @@ void soc_proc(CAN_FRAME *message) {
       tft.setCursor(10,70);
       tft.setFont(&FreeSansBold24pt7b);
       tft.setTextSize(1);
-      tft.print("ERR");
+      tft.print("...");
       printf("SoC error >> SoC: ");
       printf("%d%%", soc);
       printf("/n");            
