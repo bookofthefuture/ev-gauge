@@ -15,6 +15,11 @@
 #include <Arduino.h>
 #include <esp32_can.h> // ESP32 native can library
 #include <ElegantOTA.h> //Note: uses library in Async mode. Check documentation here: https://docs.elegantota.pro/async-mode/. Modification needed to library for this to work.
+#include <SPIFFS.h>
+#include <SPIFFS_ImageReader.h>
+
+// Image reader
+SPIFFS_ImageReader reader;
 
 // #define DEBUG = TRUE
 
@@ -59,19 +64,19 @@ AsyncWebServer server(80);
 //BLK (backlight) connect to 3v3 output
 //3v3
 //GND
-#define TFT_RST        15
-#define TFT_SDA        2      
-#define TFT_SCL        4
-#define TFT_DC         16 // labelled as RX2
-#define TFT_1_CS       17 // labelled as TX_2
-#define TFT_2_CS       5 // break track and bridge across
+#define TFT_RST        3
+#define TFT_SDA        1      
+#define TFT_SCL        22
+#define TFT_DC         21 // labelled as RX2
+#define TFT_1_CS       19 // labelled as TX_2
+#define TFT_2_CS       23 // break track and bridge across
 
 Adafruit_ST7735 tft1 = Adafruit_ST7735(TFT_1_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
 Adafruit_ST7735 tft2 = Adafruit_ST7735(TFT_2_CS, TFT_DC, TFT_SDA, TFT_SCL, -1);
 
 // Configure CAN TX/RX Pins
-#define CAN_RX GPIO_NUM_19
-#define CAN_TX GPIO_NUM_21
+#define CAN_RX GPIO_NUM_2
+#define CAN_TX GPIO_NUM_15
 
 // Pi for circle drawing
 float p = 3.1415926;
@@ -83,6 +88,15 @@ float temp;
 
 void setup() {
 #ifdef DEBUG
+
+  // initialize SPIFFS
+  if(!SPIFFS.begin()) {
+    Serial.println("SPIFFS initialisation failed!");
+    while (1);
+  }
+  reader.drawBMP("/launch.bmp", tft1, 0, 0);
+  delay(5000);
+
   Serial.begin(115200);
   if (ESP38_PIN == 0) {
     Serial.println("Configured for 30 Pin ESP32 Dev Module");
@@ -109,7 +123,7 @@ void setup() {
   server.begin();
 #ifdef DEBUG
   Serial.println("HTTP server started");
-#endif
+#endif 
   delay(4000);
   
 // Initialise CANBus
@@ -126,6 +140,16 @@ void setup() {
   tft1.setTextColor(ST77XX_WHITE);
   tft1.setRotation(2);
   tft1.fillScreen(ST77XX_BLACK);
+
+
+
+  tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+  tft2.setTextWrap(false);
+  tft2.setTextColor(ST77XX_WHITE);
+  tft2.setRotation(2);
+  tft2.fillScreen(ST77XX_BLACK);
+  reader.drawBMP("/launch.bmp", tft2, 0, 0);
+
 
 #ifdef DEBUG
   Serial.println("Ready ...!");
