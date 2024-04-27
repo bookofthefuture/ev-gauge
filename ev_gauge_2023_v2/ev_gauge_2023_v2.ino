@@ -21,7 +21,7 @@
 // Image reader
 SPIFFS_ImageReader reader;
 
-// #define DEBUG = TRUE
+#define DEBUG
 
 // OTA CONFIG
 const char* ssid = "gaugedriver";
@@ -87,25 +87,25 @@ int delta;
 float temp;
 
 void setup() {
-#ifdef DEBUG
+//#ifdef DEBUG
+  Serial.begin(115200);
+  Serial.println("Hello");
+//#endif
 
+  
   // initialize SPIFFS
   if(!SPIFFS.begin()) {
     Serial.println("SPIFFS initialisation failed!");
     while (1);
   }
-  reader.drawBMP("/launch.bmp", tft1, 0, 0);
-  delay(5000);
 
-  Serial.begin(115200);
-  if (ESP38_PIN == 0) {
-    Serial.println("Configured for 30 Pin ESP32 Dev Module");
-    } else if (ESP38_PIN == 1) {
-    Serial.println("Configured for 38 Pin ESP32 Dev Module");
-    } else {
-    Serial.println("Pinout configuration error");     
-    }
-#endif
+// Initialise 1.8" TFT screen:
+  tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+  tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+  
+  reader.drawBMP("/launch.bmp", tft1, 0, 0);
+  reader.drawBMP("/launch.bmp", tft2, 0, 0);
+
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
   Serial.println("");
@@ -134,21 +134,15 @@ void setup() {
   CAN0.begin(500000);
   pinMode(TFT_RST, OUTPUT);
 
-// Initialise 1.8" TFT screen:
-  tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
   tft1.setTextWrap(false);
   tft1.setTextColor(ST77XX_WHITE);
   tft1.setRotation(2);
   tft1.fillScreen(ST77XX_BLACK);
 
-
-
-  tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
   tft2.setTextWrap(false);
   tft2.setTextColor(ST77XX_WHITE);
   tft2.setRotation(2);
   tft2.fillScreen(ST77XX_BLACK);
-  reader.drawBMP("/launch.bmp", tft2, 0, 0);
 
 
 #ifdef DEBUG
