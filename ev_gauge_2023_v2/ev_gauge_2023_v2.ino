@@ -128,6 +128,7 @@ void setup() {
   // Initialise 1.8" TFT screen and draw logo
   pinMode(TFT_RST, OUTPUT);
   tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+  tft.setRotation(2);
   reader.drawBMP("/launch.bmp", tft, 0, 0);
   backlight_ramp_up();
 
