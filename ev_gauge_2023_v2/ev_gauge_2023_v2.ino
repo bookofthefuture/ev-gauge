@@ -128,7 +128,7 @@ void setup() {
   // Initialise 1.8" TFT screen and draw logo
   pinMode(TFT_RST, OUTPUT);
   tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-  tft.setRotation(2);
+  tft.setRotation(2); // note this is now repeated in more than one place. May be unnecessary. May mean logo needs inverting.
   reader.drawBMP("/launch.bmp", tft, 0, 0);
   backlight_ramp_up();
 
@@ -241,6 +241,7 @@ void soc_proc(CAN_FRAME *message) {
   #endif
   if(message_status == 0){
     backlight_ramp_down;
+    clear_screen();
   }
   message_status = 1; // set flag to show a new canbus message has been received
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
@@ -279,6 +280,10 @@ void soc_proc(CAN_FRAME *message) {
 }
 
 void temp_proc(CAN_FRAME *message) {
+  if(message_status == 0) {
+    backlight_ramp_down();
+    clear_screen();
+  }
   message_status = 1;  // set flag to show a new canbus message has been received
   #ifdef DEBUG
     printFrame(message);
@@ -315,10 +320,17 @@ void temp_proc(CAN_FRAME *message) {
       tft.print("N/A");
     }
   }
+  if(backlight_status == 0) {
+    backlight_ramp_up;
+  }
 }
 
 void delta_proc(CAN_FRAME *message) {
-  message_status = 1; // set flag to show a new canbus message has been received
+  if(message_status == 0) {
+    backlight_ramp_down();
+    clear_screen();
+  }
+  message_status = 1;  // set flag to show a new canbus message has been received
   #ifdef DEBUG
     printFrame(message);  
   #endif
@@ -354,6 +366,9 @@ void delta_proc(CAN_FRAME *message) {
       tft.setTextSize(1);
       tft.print("N/A");
     }
+  }
+  if(backlight_status == 0) {
+    backlight_ramp_up;
   }
 }
 
@@ -508,11 +523,7 @@ void error_display() {
     Serial.println("Error Display");
   #endif
   backlight_ramp_down();
-  tft.setTextWrap(false);
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setRotation(2);
-  tft.fillScreen(ST77XX_BLACK);
-  tft.setFont(&FreeSansBold9pt7b);
+  clearscreen();
   tft.setCursor(10, 70);
   tft.setTextSize(1);
   tft.print("Error: CAN");
@@ -521,6 +532,14 @@ void error_display() {
   tft.setCursor(10, 110);
   tft.print("timeout");  
   backlight_ramp_up();
+}
+
+void clear_screen() {
+  tft.setTextWrap(false);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setRotation(2);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setFont(&FreeSansBold9pt7b); 
 }
 
 void backlight_ramp_up() {
