@@ -63,10 +63,11 @@ unsigned char tempmsb;
 unsigned char targetlsb;
 unsigned char targetmsb;
 
-// CANbus Status
+// CANbus/Error Status
 int message_status = 0;
 int canflag = 0;
 int cantimer;
+int error_status = 0;
 
 AsyncWebServer server(80);
 
@@ -124,6 +125,12 @@ if(!SPIFFS.begin()) {
   while (1);
   }
 
+// Initialise 1.8" TFT screen and draw logo
+pinMode(TFT_RST, OUTPUT);
+tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+reader.drawBMP("/launch.bmp", tft, 0, 0);
+backlight_ramp_up();
+
 // start ElegantOTA wifi access point
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
@@ -152,12 +159,6 @@ if(!SPIFFS.begin()) {
 #endif
 CAN0.setCANPins(CAN_RX, CAN_TX);
 CAN0.begin(500000);
-  
-// Initialise 1.8" TFT screen and draw logo
-pinMode(TFT_RST, OUTPUT);
-tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-reader.drawBMP("/launch.bmp", tft, 0, 0);
-backlight_ramp_up();
 
 // Set up can filters for target IDs
 CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
@@ -197,15 +198,26 @@ void loop() {
     cantimer = millis();  //get ready for the next iteration
     if(message_status == 0) {
       canflag++;
+      #ifdef DEBUG
+        Serial.print("Can Flag: ");
+        Serial.println(canflag);
+      #endif  
     } else {
       canflag = 0;
+      error_status = 0;
     }
   }
+  if(canflag > 3) {
+    #ifdef DEBUG
+      Serial.println("canflag trigger");
+    #endif
+    if(error_status == 0){
+      error_display();
+      error_status = 1;
+    }
  
   message_status = 0;
-  if(canflag>3) {
-    error_display;
-  }
+}
 }
 
 void printFrame(CAN_FRAME *message)
@@ -491,8 +503,10 @@ void onOTAEnd(bool success) {
 
 void error_display() {
   // Display error if no can message received
-
-  backlight_ramp_down;
+  #ifdef DEBUG
+    Serial.println("Error Display");
+  #endif
+  backlight_ramp_down();
   tft.setTextWrap(false);
   tft.setTextColor(ST77XX_WHITE);
   tft.setRotation(2);
@@ -502,8 +516,10 @@ void error_display() {
   tft.setTextSize(1);
   tft.print("Error: CAN");
   tft.setCursor(10, 90);
-  tft.print("message timeout");
-  backlight_ramp_up;
+  tft.print("message");
+  tft.setCursor(10, 110);
+  tft.print("timeout");  
+  backlight_ramp_up();
 }
 
 void backlight_ramp_up() {
