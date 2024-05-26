@@ -108,30 +108,30 @@ int delta;
 float temp;
 
 void setup() {
-// Setup backlights and set to black
-ledcSetup(TFT_BLK_CHAN, TFT_FREQ, RESOLUTION);
-ledcAttachPin(TFT_BLK, TFT_BLK_CHAN);
-ledcWrite(TFT_BLK_CHAN, 0);
+  // Setup backlights and set to black
+  ledcSetup(TFT_BLK_CHAN, TFT_FREQ, RESOLUTION);
+  ledcAttachPin(TFT_BLK, TFT_BLK_CHAN);
+  ledcWrite(TFT_BLK_CHAN, 0);
   
-#ifdef DEBUG
-  Serial.begin(115200);
-#endif
-
-// initialize SPIFFS
-if(!SPIFFS.begin()) {
   #ifdef DEBUG
-    Serial.println("SPIFFS initialisation failed!");
+    Serial.begin(115200);
   #endif
-  while (1);
-  }
 
-// Initialise 1.8" TFT screen and draw logo
-pinMode(TFT_RST, OUTPUT);
-tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-reader.drawBMP("/launch.bmp", tft, 0, 0);
-backlight_ramp_up();
+  // initialize SPIFFS
+  if(!SPIFFS.begin()) {
+    #ifdef DEBUG
+      Serial.println("SPIFFS initialisation failed!");
+    #endif
+    while (1);
+    }
 
-// start ElegantOTA wifi access point
+  // Initialise 1.8" TFT screen and draw logo
+  pinMode(TFT_RST, OUTPUT);
+  tft.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+  reader.drawBMP("/launch.bmp", tft, 0, 0);
+  backlight_ramp_up();
+
+  // start ElegantOTA wifi access point
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
   Serial.println("");
@@ -139,40 +139,40 @@ backlight_ramp_up();
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "Gauge Driver OTA Interface");
   });
-
+  
+  ElegantOTA.setAutoReboot(true);
   ElegantOTA.begin(&server);    // Start ElegantOTA
    // ElegantOTA callbacks
   ElegantOTA.onStart(onOTAStart);
   ElegantOTA.onProgress(onOTAProgress);
   ElegantOTA.onEnd(onOTAEnd);
   server.begin();
-#ifdef DEBUG
-  Serial.println("HTTP server started");
-#endif
+  #ifdef DEBUG
+   Serial.println("HTTP server started");
+  #endif
 
-// delay while things wake up?
-//  delay(4000);
+  // delay while things wake up?
+  //  delay(4000);
   
-// Initialise CANBus
-#ifdef DEBUG
-  Serial.println("Initializing CANBus...");
-#endif
-CAN0.setCANPins(CAN_RX, CAN_TX);
-CAN0.begin(500000);
+  // Initialise CANBus
+  #ifdef DEBUG
+    Serial.println("Initializing CANBus...");
+  #endif
+  CAN0.setCANPins(CAN_RX, CAN_TX);
+  CAN0.begin(500000);
 
-// Set up can filters for target IDs
-CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
-CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
-CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
-CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
-//CAN0.watchFor(); //then let everything else through anyway - enable for debugging
+  // Set up can filters for target IDs
+  CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
+  CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
+  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
+  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
+  //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
 
-// Set callbacks for target IDs to process and update display
-CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
-CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
-CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
-CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
-
+  // Set callbacks for target IDs to process and update display
+  CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
+  CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
+  CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
+  CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
 }
 
 void loop() {
@@ -217,7 +217,7 @@ void loop() {
     }
  
   message_status = 0;
-}
+  }
 }
 
 void printFrame(CAN_FRAME *message)
