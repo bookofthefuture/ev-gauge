@@ -166,14 +166,16 @@ void setup() {
   CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
   CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
   CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
-  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
+// disabling heater function
+//  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
   //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
 
   // Set callbacks for target IDs to process and update display
   CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
   CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
   CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
-  CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
+// disabling heater function
+//  CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
 }
 
 void loop() {
@@ -235,6 +237,7 @@ void printFrame(CAN_FRAME *message)
   Serial.println();
 }
 
+// State of Charge calculation and display
 void soc_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
@@ -523,7 +526,7 @@ void error_display() {
     Serial.println("Error Display");
   #endif
   backlight_ramp_down();
-  clearscreen();
+  clear_screen();
   tft.setCursor(10, 70);
   tft.setTextSize(1);
   tft.print("Error: CAN");
