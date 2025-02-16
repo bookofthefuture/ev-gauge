@@ -99,15 +99,7 @@ int delta;
 float temp;
   
 void setup() {
-  
-  // Setup backlights and set to black
-  ledcSetup(TFT_1_BLK_CHAN, TFT_FREQ, RESOLUTION);  
-  ledcSetup(TFT_2_BLK_CHAN, TFT_FREQ, RESOLUTION);
-  ledcAttachPin(TFT_1_BLK, TFT_1_BLK_CHAN);
-  ledcAttachPin(TFT_2_BLK, TFT_2_BLK_CHAN);
-  ledcWrite(TFT_1_BLK_CHAN, 0);
-  ledcWrite(TFT_1_BLK_CHAN, 0);
-    
+
   #ifdef DEBUG
     Serial.begin(115200);
   #endif
@@ -116,15 +108,23 @@ void setup() {
   if(!SPIFFS.begin()) {
     Serial.println("SPIFFS initialisation failed!");
     while (1);
-  }
-  
+  }  
+
+  // Setup backlights and set to black
+  ledcSetup(TFT_1_BLK_CHAN, TFT_FREQ, RESOLUTION);  
+  ledcSetup(TFT_2_BLK_CHAN, TFT_FREQ, RESOLUTION);
+  ledcAttachPin(TFT_1_BLK, TFT_1_BLK_CHAN);
+  ledcAttachPin(TFT_2_BLK, TFT_2_BLK_CHAN);
+  ledcWrite(TFT_1_BLK_CHAN, 0);
+  ledcWrite(TFT_1_BLK_CHAN, 0);
+      
   // Initialise 1.8" TFT screen:
+  pinMode(TFT_RST, OUTPUT);
   tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
   tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-  pinMode(TFT_RST, OUTPUT);
     
   reader.drawBMP("/launch.bmp", tft1, 0, 0);
-  reader.drawBMP("/launch.bmp", tft2, 0, 0);
+  reader.drawBMP("/launch2.bmp", tft2, 0, 0);
   
   backlight_ramp_up();
   
@@ -523,7 +523,7 @@ void loop() {
       // changing the LED brightness with PWM
       ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
       ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
-      delay(15);
+      delay(5);
     }
   
   }
