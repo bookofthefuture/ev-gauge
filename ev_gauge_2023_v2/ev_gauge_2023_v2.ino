@@ -22,8 +22,10 @@
   
 // Image reader
 SPIFFS_ImageReader reader;
+//SPIFFS_ImageReader reader2;
+
   
-#define DEBUG = 2; //DEBUG MODES: 1 engage serial output 2 disable can functions for display testing
+#define DEBUG = 1; //DEBUG MODES: 1 engage serial output 2 disable can functions for display testing
   
 // OTA CONFIG
 const char* ssid = "gaugedriver";
@@ -83,9 +85,9 @@ const int TFT_2_BLK_CHAN = 1;
 const int RESOLUTION = 8;
   
 //TFT CONFIG
-Adafruit_ST7735 tft2 = Adafruit_ST7735(TFT_1_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
-Adafruit_ST7735 tft1 = Adafruit_ST7735(TFT_2_CS, TFT_DC, TFT_SDA, TFT_SCL, -1);
-  
+Adafruit_ST7735 tft1 = Adafruit_ST7735(TFT_1_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
+Adafruit_ST7735 tft2 = Adafruit_ST7735(TFT_2_CS, TFT_DC, TFT_SDA, TFT_SCL, -1);
+
 // Configure CAN TX/RX Pins
 #define CAN_RX GPIO_NUM_2
 #define CAN_TX GPIO_NUM_15
@@ -99,7 +101,7 @@ int delta;
 float temp;
   
 void setup() {
-    
+   
   #ifdef DEBUG
     Serial.begin(115200);
   #endif
@@ -107,6 +109,23 @@ void setup() {
   Serial.print(millis());
   Serial.print("\t");
   Serial.println("In setup");
+
+  pinMode(TFT_RST, OUTPUT);
+  
+  // initialize SPIFFS
+  if(!SPIFFS.begin()) {
+    Serial.println("SPIFFS initialisation failed!");
+    while (1);
+  }  
+
+  // Initialise 1.8" TFT screen:
+  tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+  tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+
+  Serial.print(millis());
+  Serial.print("\t");
+  Serial.println("TFT Init complete");
+
   // Setup backlights and set to black
   ledcSetup(TFT_1_BLK_CHAN, TFT_FREQ, RESOLUTION);  
   ledcSetup(TFT_2_BLK_CHAN, TFT_FREQ, RESOLUTION);
@@ -118,7 +137,7 @@ void setup() {
   Serial.print(millis());
   Serial.print("\t");
   Serial.println("Backlight prep complete");
-
+    
   reader.drawBMP("/launch.bmp", tft1, 0, 0);
   reader.drawBMP("/launch.bmp", tft2, 0, 0);
 
@@ -126,33 +145,12 @@ void setup() {
   Serial.print("\t");
   Serial.println("Logos drawn");
 
-  // Initialise 1.8" TFT screen:
-  pinMode(TFT_RST, OUTPUT);
-  tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-  tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-
-  Serial.print(millis());
-  Serial.print("\t");
-  Serial.println("TFT Init complete");
-    
-
-  
   backlight_ramp_up();
 
   Serial.print(millis());
   Serial.print("/t");
   Serial.println("Backlight ramp complete");
 
-
-  
-  // initialize SPIFFS
-  if(!SPIFFS.begin()) {
-    Serial.println("SPIFFS initialisation failed!");
-    while (1);
-  }  
-
-
-  
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
   Serial.println("");
@@ -179,26 +177,7 @@ void setup() {
   #endif
     CAN0.setCANPins(CAN_RX, CAN_TX);
     CAN0.begin(500000);
-  
-    backlight_ramp_down();
-  
-    tft1.setTextWrap(false);
-    tft1.setTextColor(ST77XX_WHITE);
-    tft1.setRotation(2);
-    tft1.fillScreen(ST77XX_BLACK);
-    Serial.println("Erased Screen 1");
-   
-    tft2.setTextWrap(false);
-    tft2.setTextColor(ST77XX_WHITE);
-    tft2.setRotation(2);
-    tft2.fillScreen(ST77XX_BLACK);
-    Serial.println("Erased Screen 2");
-    backlight_ramp_up();
-  
-  #ifdef DEBUG
-    Serial.println("Ready ...!");
-  #endif
-  
+    
   // Set up can filters for target IDs
   CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
   CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
@@ -211,6 +190,21 @@ void setup() {
   CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
   CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
   CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
+
+    backlight_ramp_down();
+  
+    tft1.setTextWrap(false);
+    tft1.setTextColor(ST77XX_WHITE);
+    tft1.setRotation(0);
+    tft1.fillScreen(ST77XX_BLACK);
+    Serial.println("Erased Screen 1");
+   
+    tft2.setTextWrap(false);
+    tft2.setTextColor(ST77XX_WHITE);
+    tft2.setRotation(0);
+    tft2.fillScreen(ST77XX_BLACK);
+    Serial.println("Erased Screen 2");
+
      
   // Initial display of SoC before data arrives
   tft1.setCursor(0,9);
@@ -228,7 +222,6 @@ void setup() {
   tft1.setTextSize(1);
   tft1.setTextColor(ST77XX_WHITE);  
   tft1.print("TAR");  
-  
   
   //  tft1.setFont(&FreeSansBold24pt7b);
   //  tft1.setCursor(20, 70);
@@ -255,6 +248,12 @@ void setup() {
   tft1.setFont(&FreeSansBold12pt7b);
   tft1.setTextSize(1);
   tft1.print("N/A");   
+
+  backlight_ramp_up();
+  
+  #ifdef DEBUG
+    Serial.println("Ready ...!");
+  #endif  
 }
   
 void loop() {
@@ -543,23 +542,25 @@ void loop() {
   }
   
   void backlight_ramp_up() {
-  
-    for(int dutyCycle = 0; dutyCycle <= 255; dutyCycle++){   
+    for(int dutyCycle = 0; dutyCycle < 255; dutyCycle++){   
       // changing the LED brightness with PWM
       ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
       ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
       delay(5);
     }
-  
+      ledcWrite(TFT_1_BLK_CHAN, 255);
+      ledcWrite(TFT_2_BLK_CHAN, 255);
+      return;
   }
   
   void backlight_ramp_down() {
-  
     for(int dutyCycle = 255; dutyCycle > 0; dutyCycle--){   
       // changing the LED brightness with PWM
       ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
       ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
-      delay(15);
+      delay(5);
     }
-  
+      ledcWrite(TFT_1_BLK_CHAN, 0);
+      ledcWrite(TFT_2_BLK_CHAN, 0);
+    return;
   }
