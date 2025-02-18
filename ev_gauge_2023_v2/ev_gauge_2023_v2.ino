@@ -19,6 +19,7 @@
 #include <ElegantOTA.h> //Note: uses library in Async mode. Check documentation here: https://docs.elegantota.pro/async-mode/. Modification needed to library for this to work.
 #include <SPIFFS.h>
 #include <SPIFFS_ImageReader.h> // https://github.com/lucadentella/SPIFFS_ImageReader
+#include <TaskScheduler.h> // https://github.com/arkhipenko/TaskScheduler
   
 // Image reader
 SPIFFS_ImageReader reader;
@@ -99,16 +100,28 @@ float p = 3.1415926;
 int soc;
 int delta;
 float temp;
-  
+
+// Task Scheduling
+void ms10Task();
+
+Task ms10(10, -1, &ms10Task);
+
+Scheduler runner;
+
 void setup() {
    
   #ifdef DEBUG
     Serial.begin(115200);
+    Serial.print(millis());
+    Serial.print("\t");
+    Serial.println("In setup");
   #endif
-  
-  Serial.print(millis());
-  Serial.print("\t");
-  Serial.println("In setup");
+
+  // Task scheduler
+  runner.init();
+
+  runner.addTask(ms10);
+  ms10.enable();
 
   pinMode(TFT_RST, OUTPUT);
   
@@ -175,14 +188,14 @@ void setup() {
   #ifdef DEBUG
     Serial.println("Initializing CANBus...");
   #endif
-    CAN0.setCANPins(CAN_RX, CAN_TX);
-    CAN0.begin(500000);
+  CAN0.setCANPins(CAN_RX, CAN_TX);
+  CAN0.begin(500000);
     
   // Set up can filters for target IDs
   CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
   CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
   CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
-  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
+  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x398 to get heater info
   //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
   
   // Set callbacks for target IDs to process and update display
@@ -191,21 +204,48 @@ void setup() {
   CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
   CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
 
-    backlight_ramp_down();
+  backlight_ramp_down();
   
-    tft1.setTextWrap(false);
-    tft1.setTextColor(ST77XX_WHITE);
-    tft1.setRotation(0);
-    tft1.fillScreen(ST77XX_BLACK);
+  tft1.setTextWrap(false);
+  tft1.setTextColor(ST77XX_WHITE);
+  tft1.setRotation(0);
+  tft1.fillScreen(ST77XX_BLACK);
+  #ifdef DEBUG
     Serial.println("Erased Screen 1");
-   
-    tft2.setTextWrap(false);
-    tft2.setTextColor(ST77XX_WHITE);
-    tft2.setRotation(0);
-    tft2.fillScreen(ST77XX_BLACK);
-    Serial.println("Erased Screen 2");
+  #endif
 
-     
+  tft2.setTextWrap(false);
+  tft2.setTextColor(ST77XX_WHITE);
+  tft2.setRotation(0);
+  tft2.fillScreen(ST77XX_BLACK);
+  #ifdef DEBUG
+    Serial.println("Erased Screen 2");
+  #endif
+
+  backlight_ramp_up();
+
+  tft1InitialDisplay();
+  tft2InitialDisplay();
+
+  #ifdef DEBUG
+    Serial.println("Ready ...!");
+  #endif  
+}
+  
+void loop() {
+  runner.execute();
+  ElegantOTA.loop();
+  
+  #ifdef DEBUG
+    CAN_FRAME message;
+    if (CAN0.read(message)) {
+      printFrame(&message);
+    }
+  #endif
+  
+  }
+
+void tft1InitialDisplay() {
   // Initial display of SoC before data arrives
   tft1.setCursor(0,9);
   tft1.setFont(&FreeSansBold9pt7b);
@@ -249,32 +289,54 @@ void setup() {
   tft1.setTextSize(1);
   tft1.print("N/A");   
 
-  backlight_ramp_up();
-  
-  #ifdef DEBUG
-    Serial.println("Ready ...!");
-  #endif  
 }
+
+void tft2InitialDisplay() {
+  // Initial display of SoC before data arrives
+  tft2.setCursor(0,9);
+  tft2.setFont(&FreeSansBold9pt7b);
+  tft2.setTextSize(1);
+  tft2.setTextColor(ST77XX_RED);  
+  tft2.print("HV");  
+  tft2.setCursor(30,15);
+  tft2.setFont(&FreeSansBold9pt7b);
+  tft2.setTextSize(1);
+  tft2.setTextColor(ST77XX_RED);  
+  tft2.print("HE");  
+  tft2.setCursor(60,15);
+  tft2.setFont(&FreeSansBold9pt7b);
+  tft2.setTextSize(1);
+  tft2.setTextColor(ST77XX_WHITE);  
+  tft2.print("TAR");  
   
-void loop() {
-  ElegantOTA.loop();
+  //  tft1.setFont(&FreeSansBold24pt7b);
+  //  tft1.setCursor(20, 70);
+  //  tft1.setTextSize(1);
+  tft2.setFont(&FreeSansBold9pt7b);
+  tft2.setCursor(10, 70);
+  tft2.setTextSize(1);
+  tft2.print("Waiting for");
+  tft2.setCursor(10, 90);
+  tft2.print("CAN...");
+     
+  // Initial display of max delta before data arrives
+  tft2.fillTriangle(68, 154, 74, 135, 80, 154, ST77XX_BLUE);
+  tft2.setCursor(84, 153);
+  tft2.setFont(&FreeSansBold12pt7b);
+  tft2.setTextSize(1);
+  tft2.print("N/A");
   
-  #ifdef DEBUG
-    CAN_FRAME message;
-    if (CAN0.read(message)) {
-      printFrame(&message);
-    }
-  #endif
-  
-    if (millis() - lastMillis >= 25) {
-     lastMillis = millis();  //get ready for the next iteration
-     eml();
-     eng_speed();
-     asc();
-    }
-  }
-  
-  void printFrame(CAN_FRAME *message)
+  // Initial display of module temp before data arrives
+  tft2.fillCircle(8, 140, 2, ST77XX_RED);
+  tft2.fillCircle(8, 150, 4, ST77XX_RED);
+  tft2.fillRect(6, 140, 5, 6, ST77XX_RED);
+  tft2.setCursor(16, 153);
+  tft2.setFont(&FreeSansBold12pt7b);
+  tft2.setTextSize(1);
+  tft2.print("N/A");   
+}
+
+void printFrame(CAN_FRAME *message)
   {
     Serial.print(message->id, HEX);
     if (message->extended) Serial.print(" X ");
@@ -481,6 +543,7 @@ void loop() {
     if (clusterStart == 1) {revCount = 44800; clusterStart = 0;}
   
     txFrame.rtr = 0;
+    txFrame.id = 0x316;
     txFrame.length = 8;
     txFrame.extended = false;
     txFrame.data.uint8[0] = 13;//bit 0 should be 1
@@ -564,3 +627,10 @@ void loop() {
       ledcWrite(TFT_2_BLK_CHAN, 0);
     return;
   }
+
+
+void ms10Task() {
+  eml();
+  eng_speed();
+  asc(); 
+}
