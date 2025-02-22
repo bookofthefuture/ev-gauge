@@ -90,7 +90,7 @@ Adafruit_ST7735 tft1 = Adafruit_ST7735(TFT_1_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_R
 Adafruit_ST7735 tft2 = Adafruit_ST7735(TFT_2_CS, TFT_DC, TFT_SDA, TFT_SCL, -1);
 
 // Configure CAN TX/RX Pins
-#define CAN_RX GPIO_NUM_2
+#define CAN_RX GPIO_NUM_13
 #define CAN_TX GPIO_NUM_15
   
 // Pi for circle drawing
