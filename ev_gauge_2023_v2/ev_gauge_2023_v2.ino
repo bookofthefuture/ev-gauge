@@ -4,7 +4,9 @@
  * Now with added canbus signalling to control analogue gauges and delete error messages in car
  * Added code to read and display information from outlander heater controller - NOT TESTED!!
  * Added dual displays
- */
+  * 0x398 00 09 00 3B 3B 00 00 00 at 100ms byte 3 seems to be water temperature inlet, byte 4 water temperature outlet
+*/
+ 
   
 //Include libraries for display, OTA and can communications
 #include <WiFi.h>
@@ -23,10 +25,8 @@
   
 // Image reader
 SPIFFS_ImageReader reader;
-//SPIFFS_ImageReader reader2;
-
   
-#define DEBUG = 1; //DEBUG MODES: 1 engage serial output 2 disable can functions for display testing
+#define DEBUG;
   
 // OTA CONFIG
 const char* ssid = "gaugedriver";
@@ -50,10 +50,8 @@ unsigned char ABSMsg = 0x11; // This is recalculated on a timer so no input need
 // HEATER DATA
 bool hvPresent = false;
 bool heating = false;
-unsigned char templsb;
-unsigned char tempmsb;
-unsigned char targetlsb;
-unsigned char targetmsb;
+unsigned char heater_temp;
+unsigned char heater_target;
 
 // Web interface  
 AsyncWebServer server(80);
@@ -164,46 +162,6 @@ void setup() {
   Serial.print("/t");
   Serial.println("Backlight ramp complete");
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(ssid, password);
-  Serial.println("");
-  
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Gauge Driver OTA Interface");
-  });
-  
-  ElegantOTA.begin(&server);    // Start ElegantOTA
-  // ElegantOTA callbacks
-  ElegantOTA.onStart(onOTAStart);
-  ElegantOTA.onProgress(onOTAProgress);
-  ElegantOTA.onEnd(onOTAEnd);
-  
-  server.begin();
-  #ifdef DEBUG
-    Serial.println("HTTP server started");
-  #endif 
-  delay(4000);
-    
-  // Initialise CANBus
-  #ifdef DEBUG
-    Serial.println("Initializing CANBus...");
-  #endif
-  CAN0.setCANPins(CAN_RX, CAN_TX);
-  CAN0.begin(500000);
-    
-  // Set up can filters for target IDs
-  CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
-  CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
-  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
-  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x398 to get heater info
-  //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
-  
-  // Set callbacks for target IDs to process and update display
-  CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
-  CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
-  CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
-  CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
-
   backlight_ramp_down();
   
   tft1.setTextWrap(false);
@@ -226,6 +184,46 @@ void setup() {
 
   tft1InitialDisplay();
   tft2InitialDisplay();
+  
+  // Initialise CANBus
+  #ifdef DEBUG
+    Serial.println("Initializing CANBus...");
+  #endif
+  CAN0.setCANPins(CAN_RX, CAN_TX);
+  CAN0.begin(500000);
+    
+  // Set up can filters for target IDs
+  CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
+  CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
+  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
+  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x398 to get heater info
+  //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
+  
+  // Set callbacks for target IDs to process and update display
+  CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
+  CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
+  CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
+  CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
+  Serial.println("");
+  
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Gauge Driver OTA Interface");
+  });
+  
+  ElegantOTA.begin(&server);    // Start ElegantOTA
+  // ElegantOTA callbacks
+  ElegantOTA.onStart(onOTAStart);
+  ElegantOTA.onProgress(onOTAProgress);
+  ElegantOTA.onEnd(onOTAEnd);
+  
+  server.begin();
+  #ifdef DEBUG
+    Serial.println("HTTP server started");
+  #endif 
+  delay(4000);
 
   #ifdef DEBUG
     Serial.println("Ready ...!");
@@ -237,36 +235,28 @@ void loop() {
   ElegantOTA.loop();
   
   #ifdef DEBUG
-    CAN_FRAME message;
-    if (CAN0.read(message)) {
-      printFrame(&message);
-    }
+//    CAN_FRAME message;
+//    if (CAN0.read(message)) {
+//      printFrame(&message);
+//    }
   #endif
   
   }
 
 void tft1InitialDisplay() {
   // Initial display of SoC before data arrives
-  tft1.setCursor(0,9);
   tft1.setFont(&FreeSansBold9pt7b);
   tft1.setTextSize(1);
+  tft1.setCursor(0,12);
   tft1.setTextColor(ST77XX_RED);  
   tft1.print("HV");  
-  tft1.setCursor(30,15);
-  tft1.setFont(&FreeSansBold9pt7b);
-  tft1.setTextSize(1);
-  tft1.setTextColor(ST77XX_RED);  
-  tft1.print("HE");  
-  tft1.setCursor(60,15);
-  tft1.setFont(&FreeSansBold9pt7b);
-  tft1.setTextSize(1);
+  tft1.setCursor(30,12);
   tft1.setTextColor(ST77XX_WHITE);  
-  tft1.print("TAR");  
-  
-  //  tft1.setFont(&FreeSansBold24pt7b);
-  //  tft1.setCursor(20, 70);
-  //  tft1.setTextSize(1);
-  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.print("T:");  
+  tft1.setCursor(80,12);
+  tft1.setTextColor(ST77XX_WHITE);  
+  tft1.print("A:");  
+
   tft1.setCursor(10, 70);
   tft1.setTextSize(1);
   tft1.print("Waiting for");
@@ -293,7 +283,7 @@ void tft1InitialDisplay() {
 
 void tft2InitialDisplay() {
   // Initial display of SoC before data arrives
-  tft2.setCursor(0,9);
+  tft2.setCursor(0,12);
   tft2.setFont(&FreeSansBold9pt7b);
   tft2.setTextSize(1);
   tft2.setTextColor(ST77XX_RED);  
@@ -350,41 +340,46 @@ void printFrame(CAN_FRAME *message)
     Serial.println();
   }
   
-  void soc_proc(CAN_FRAME *message) {
+void soc_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
     printFrame(message);
-    if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
-      soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
-      if(soc > 100) {
-        tft1.drawRect(0,16,128,100,ST77XX_BLACK);
-        tft1.fillRect(0,16,128,100,ST77XX_BLACK);
-        tft1.setCursor(10,70);
-        tft1.setFont(&FreeSansBold24pt7b);
-        tft1.setTextSize(1);
-        tft1.print("...");
+  #endif
+  tft1.setTextColor(ST77XX_WHITE);  
+  tft1.setFont(&FreeSansBold24pt7b);
+  tft1.setTextSize(1);
+  tft1.setCursor(10,70);
+
+  if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
+    soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
+    if(soc > 100) {
+      tft1.drawRect(0,16,128,100,ST77XX_BLACK);
+      tft1.fillRect(0,16,128,100,ST77XX_BLACK);
+      tft1.print("...");
+      #ifdef DEBUG
         printf("SoC error >> SoC: ");
         printf("%d%%", soc);
-        printf("/n");            
-      } else if(soc) {
-        tft1.drawRect(0,16,128,100,ST77XX_BLACK);
-        tft1.fillRect(0,16,128,100,ST77XX_BLACK);
-        tft1.setCursor(10,70);
-        tft1.setFont(&FreeSansBold24pt7b);
-        tft1.setTextSize(1);
-        tft1.print(soc);
-        tft1.print("%");
+        printf("/n");
+      #endif            
+    } else if(soc <= 100){
+      tft1.drawRect(0,16,128,100,ST77XX_BLACK);
+      tft1.fillRect(0,16,128,100,ST77XX_BLACK);
+      tft1.print(soc);
+      tft1.print("%");
+      #ifdef DEBUG
         printf("SoC: ");
         printf("%d%%", soc);
-        printf("\n");      
-      } else {
-        tft1.setCursor(18,70);
-        tft1.setFont(&FreeSansBold24pt7b);
-        tft1.setTextSize(2);
-        tft1.print("N/A");
-      }  
-    }
+        printf("\n");
+      #endif
+    } else {
+      tft1.setCursor(18,70);
+      tft1.print("N/A");
+    }  
   }
+}
   
   void temp_proc(CAN_FRAME *message) {
+    tft1.setTextColor(ST77XX_WHITE);  
+
     printFrame(message);
     if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
       temp = (message->data.byte[4] + (message->data.byte[5] <<8))/10;  
@@ -457,67 +452,66 @@ void printFrame(CAN_FRAME *message)
     }
   }
   
-  void heater_proc(CAN_FRAME *message)  {
-    printFrame(message); 
-    if(message->data.byte[0] != hvPresent || message->data.byte[2] != heating || message->data.byte[3] != templsb || message->data.byte[4] != tempmsb || message->data.byte[5] != targetlsb || message->data.byte[6] != targetmsb) {
-      message->data.byte[0] = hvPresent; // HV Present
-      message->data.byte[2] = heating; // Heater active
-      message->data.byte[3] = templsb; // Water Temp low bit
-      message->data.byte[4] = tempmsb; // Water temp high bit
-      message->data.byte[5] = targetlsb; // Target temp low bit
-      message->data.byte[6] = targetmsb; // Target temp high bit
-      int temp = (int)(((unsigned)tempmsb << 8) | templsb ); //test reconstruction - note doesn't handle negative numbers
-      int target = (int)(((unsigned)targetmsb << 8) | targetlsb ); //test reconstruction - note doesn't handle negative numbers
-      
-      Serial.println("Heater Status");
-      Serial.print("HV Present: ");
-      Serial.print(hvPresent);
-      Serial.print(" Heater Active: ");
-      Serial.print(heating);
-      Serial.print(" Water Temperature: ");
-      Serial.print(temp);
-      Serial.println("C");
-      Serial.println("");
-      Serial.println("Settings");
-      Serial.print(" Heating: ");
-      Serial.print(heating);
-      Serial.print(" Desired Water Temperature: ");
-      Serial.print(target);
-      Serial.println("");
-      Serial.println(""); 
+void heater_proc(CAN_FRAME *message)  {
+
+  if(message->data.byte[5] > 0) {heating = true;} else {heating = false;} // Heating is active
+  if(message->data.byte[6] == 0) {hvPresent = true;} else {hvPresent = false;} // HV present at heater
   
-    // clear screen if new data
-    tft1.drawRect(0,0,128,10,ST77XX_BLACK);
-    tft1.fillRect(0,0,128,10,ST77XX_BLACK);
-    
-    // top row do HV (red or green if enabled) HEAT (red or green if active) TAR (target temp) TMP (actual)
-    tft1.setCursor(0,0);
-    tft1.setFont(&FreeSansBold9pt7b);
-    tft1.setTextSize(1);
-    if(hvPresent){
-        tft1.setTextColor(ST77XX_GREEN);  
-    } else {
-        tft1.setTextColor(ST77XX_RED);  
-      }
-    tft1.print("HV");  
-    tft1.setCursor(30, 0);
-    if(heating){
-        tft1.setTextColor(ST77XX_GREEN);  
-    } else {
-        tft1.setTextColor(ST77XX_RED);  
-      }
-    tft1.print("HEAT");  
-    tft1.setTextColor(ST77XX_WHITE);
-    tft1.setCursor(60, 0);
-    tft1.print("TAR");  
-    tft1.setCursor(70, 0);  
-    tft1.print(target);  
-    tft1.setCursor(90, 0);  
-    tft1.print("TMP");  
-    tft1.setCursor(100, 0);  
-    tft1.print(temp);  
-    }
+  // top row do HV (green if enabled) T (target temp) A (actual - green if heating)
+  tft1.setCursor(0,12);
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextSize(1);
+  if(hvPresent){
+    tft1.setTextColor(ST77XX_GREEN);  
+  } else {
+    tft1.setTextColor(ST77XX_RED);  
   }
+  tft1.print("HV");   
+
+  if((message->data.byte[4] - 40) != heater_target) {
+    tft1.setCursor(50, 12);
+    tft1.setTextColor(ST77XX_BLACK);  
+    tft1.print(heater_target,1);  
+    tft1.setTextColor(ST77XX_WHITE);  
+    heater_target = message->data.byte[4] - 40; // Target Temp
+    tft1.setCursor(50, 12);
+    tft1.print(heater_target,1);  
+  }
+
+  if((message->data.byte[3] - 40) != heater_temp) {
+    tft1.setCursor(100, 12);
+    tft1.setTextColor(ST77XX_BLACK);  
+    tft1.print(heater_temp,1);  
+    if(heating){
+      tft1.setTextColor(ST77XX_GREEN);  
+    } else {
+      tft1.setTextColor(ST77XX_RED);  
+    }  
+    heater_temp = message->data.byte[3] - 40; // Water Temp
+    tft1.setCursor(100, 12);
+    tft1.print(heater_temp,1);  
+  }
+  #ifdef DEBUG
+    printFrame(message); 
+    Serial.println("Heater Status");
+    Serial.print("HV Present: ");
+    Serial.print(hvPresent);
+    Serial.print(" Heater Active: ");
+    Serial.print(heating);
+    Serial.print(" Water Temperature: ");
+    Serial.print(heater_temp);
+    Serial.println("C");
+    Serial.println("");
+    Serial.println("Settings");
+    Serial.print(" Heating: ");
+    Serial.print(heating);
+    Serial.print(" Desired Water Temperature: ");
+    Serial.print(heater_target);
+    Serial.println("");
+    Serial.println(""); 
+  #endif  
+  
+}
   
   void eml(){
     txFrame.rtr = 0;  
