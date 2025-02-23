@@ -159,7 +159,7 @@ void setup() {
   backlight_ramp_up();
 
   Serial.print(millis());
-  Serial.print("/t");
+  Serial.print("\t");
   Serial.println("Backlight ramp complete");
 
   backlight_ramp_down();
@@ -169,6 +169,8 @@ void setup() {
   tft1.setRotation(0);
   tft1.fillScreen(ST77XX_BLACK);
   #ifdef DEBUG
+    Serial.print(millis());
+    Serial.print("\t");
     Serial.println("Erased Screen 1");
   #endif
 
@@ -177,6 +179,8 @@ void setup() {
   tft2.setRotation(0);
   tft2.fillScreen(ST77XX_BLACK);
   #ifdef DEBUG
+    Serial.print(millis());
+    Serial.print("\t");
     Serial.println("Erased Screen 2");
   #endif
 
@@ -225,7 +229,31 @@ void setup() {
   #endif 
   delay(4000);
 
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
+  Serial.println("");
+  
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Gauge Driver OTA Interface");
+  });
+  
+  ElegantOTA.begin(&server);    // Start ElegantOTA
+  // ElegantOTA callbacks
+  ElegantOTA.onStart(onOTAStart);
+  ElegantOTA.onProgress(onOTAProgress);
+  ElegantOTA.onEnd(onOTAEnd);
+  
+  server.begin();
   #ifdef DEBUG
+    Serial.print(millis());
+    Serial.print("\t");
+    Serial.println("HTTP server started");
+  #endif 
+  delay(4000);
+
+  #ifdef DEBUG
+    Serial.print(millis());
+    Serial.print("\t");
     Serial.println("Ready ...!");
   #endif  
 }
