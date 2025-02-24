@@ -78,7 +78,7 @@ AsyncWebServer server(80);
 #define TFT_2_BLK      21
   
 // PWM for controlling display brightness
-const int TFT_FREQ = 1000;
+const int TFT_FREQ = 5000;
 const int TFT_1_BLK_CHAN = 0;
 const int TFT_2_BLK_CHAN = 1;
 const int RESOLUTION = 8;
