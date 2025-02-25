@@ -165,7 +165,7 @@ void setup() {
   
   tft1.setTextWrap(false);
   tft1.setTextColor(ST77XX_WHITE);
-  tft1.setRotation(0);
+  tft1.setRotation(2);
   tft1.fillScreen(ST77XX_BLACK);
   #ifdef DEBUG
     Serial.print(millis());
@@ -175,7 +175,7 @@ void setup() {
 
   tft2.setTextWrap(false);
   tft2.setTextColor(ST77XX_WHITE);
-  tft2.setRotation(0);
+  tft2.setRotation(2);
   tft2.fillScreen(ST77XX_BLACK);
   #ifdef DEBUG
     Serial.print(millis());
