@@ -62,6 +62,8 @@ AsyncWebServer server(80);
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
+#include <Fonts/ev_diy.h>
+
 
 // Configure i2c pins for display - 30 pin layout
 // Note change of layout to make wiring simpler
@@ -166,7 +168,6 @@ void setup() {
   backlight_ramp_down();
   
   tft1.setTextWrap(false);
-  tft1.setTextColor(ST77XX_WHITE);
   tft1.setRotation(2);
   tft1.fillScreen(ST77XX_BLACK);
   #ifdef DEBUG
@@ -176,7 +177,6 @@ void setup() {
   #endif
 
   tft2.setTextWrap(false);
-  tft2.setTextColor(ST77XX_WHITE);
   tft2.setRotation(2);
   tft2.fillScreen(ST77XX_BLACK);
   #ifdef DEBUG
@@ -273,44 +273,55 @@ void loop() {
   }
 
 void tft1InitialDisplay() {
-  // Initial display of SoC before data arrives
-  tft1.setFont(&FreeSansBold9pt7b);
-  tft1.setTextSize(1);
-  tft1.setCursor(0,12);
-  tft1.setTextColor(ST77XX_RED);  
-  tft1.print("HE");  
-  tft1.setCursor(30,12);
-  tft1.setTextColor(ST77XX_WHITE);  
-  tft1.print("T:");  
-  tft1.setCursor(80,12);
-  tft1.setTextColor(ST77XX_WHITE);  
-  tft1.print("A:");  
+// Initial display before data arrives
 
+// Select custom icon font
+  tft1.setFont(&ev_diy);
+
+// Heater icon
+  tft1.drawChar(0,24,128,0x9515,0,1);
+
+// Charge icon
+  tft1.drawChar(104,24,131,0x9515,0,1);
+
+// Module temp icon
+  tft1.drawChar(0,160,129,0x9515,0,1);
+
+// Module delta icon
+  tft1.drawChar(104,160,133,0x9515,0,1);
+
+// Set normal font - could integrate with symbol font to save space
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextColor(0x9515);
+
+// test text
+#ifdef DEBUG
+//heater
+  tft1.setCursor(30, 16);
+  tft1.print("30");
+// charge
+  tft1.setCursor(80, 16);
+  tft1.print("8A");
+// module temp
+  tft1.setCursor(30, 154);
+  tft1.print("5");
+// module delta
+  tft1.setCursor(80, 154);
+  tft1.print("9");
+#endif
+
+// SoC
+  tft1.drawRoundRect(2, 32, 124, 98, 5, ST77XX_WHITE);
+  tft1.setTextColor(ST77XX_WHITE);
   tft1.setCursor(10, 70);
   tft1.setTextSize(1);
   tft1.print("Waiting for");
   tft1.setCursor(10, 90);
   tft1.print("CAN...");
-     
-  // Initial display of max delta before data arrives
-  tft1.fillTriangle(68, 154, 74, 135, 80, 154, ST77XX_BLUE);
-  tft1.setCursor(84, 153);
-  tft1.setFont(&FreeSansBold12pt7b);
-  tft1.setTextSize(1);
-  tft1.print("N/A");
-  
-  // Initial display of module temp before data arrives
-  tft1.fillCircle(8, 140, 2, ST77XX_RED);
-  tft1.fillCircle(8, 150, 4, ST77XX_RED);
-  tft1.fillRect(6, 140, 5, 6, ST77XX_RED);
-  tft1.setCursor(16, 153);
-  tft1.setFont(&FreeSansBold12pt7b);
-  tft1.setTextSize(1);
-  tft1.print("N/A");   
-
 }
 
 void tft2InitialDisplay() {
+
   // Initial display of SoC before data arrives
   tft2.setCursor(0,12);
   tft2.setFont(&FreeSansBold9pt7b);
@@ -368,6 +379,95 @@ void printFrame(CAN_FRAME *message)
     }
     Serial.println();
   }
+
+void heater_proc(CAN_FRAME *message)  {
+  
+  int last_temp_displayed; //set to 1 if target and 0 if actual. Target temp only shown when it changes and stays on screen for a couple of seconds
+  int temp_display_delay; // allows for target temp to still be shown for a short delay after you stop twiddling the knob to set it
+  
+  if(message->data.byte[0] == 0) {hvPresent = true;} else {hvPresent = false;} // HV present at heater
+  if(message->data.byte[1] > 0) {heater_enabled = true;} else {heater_enabled = false;} // Heater enabled
+  if(message->data.byte[2] > 0) {heating = true;} else {heating = false;} // Heating is active
+  
+  // top row do HV (green if enabled, red if heating) T (target temp) A (actual - green if heating)
+  tft1.setCursor(0,12);
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextSize(1);
+  if(heater_enabled && !heating){
+    tft1.drawChar(0,16,128,ST77XX_WHITE,0,1);
+  } else if (heater_enabled && heating){
+    tft1.drawChar(0,16,128,0xFA80,0,1);
+  } else  {
+    tft1.drawChar(0,16,128,0x9515,0,1);
+  }
+
+  // if the target temp has changed, temporarily overwrite the temp display with that
+  if((message->data.byte[4]) != heater_target || millis() - temp_display_delay < 1000) {
+    // set the cursor to the right position
+    tft1.setCursor(30, 16);
+    //overwrite the old number in black - last_temp_displayed tells you which number
+    tft1.setTextColor(ST77XX_BLACK);  
+    if(last_temp_displayed == 1) {
+      tft1.print(heater_target,1);  
+      // set the new number
+    } else {
+      tft1.print(heater_temp,1);
+      temp_display_delay = millis();     
+    }
+
+    //write the new number in green for target temp
+    tft1.setTextColor(ST77XX_GREEN);  
+    tft1.setCursor(30, 16);
+    tft1.print(heater_target,1);  
+
+    //set flag to say the last number displayed was the target temp
+    last_temp_displayed = 1;
+
+    // or if the target temp hasn't changed, show the actual
+  } else if((message->data.byte[3]) != heater_temp) {
+    // set the cursor to the right position
+    tft1.setCursor(30, 16);
+    //overwrite the old number in black - last_temp_displayed tells you which number
+    tft1.setTextColor(ST77XX_BLACK);  
+    if(last_temp_displayed == 1) {
+      tft1.print(heater_target,1);  
+    } else {
+      tft1.print(heater_temp,1);     
+    }
+    
+    //write the new number in white for actual temp
+    heater_temp = message->data.byte[3]; // Water Temp
+    tft1.setCursor(30, 16);
+    tft1.setTextColor(ST77XX_WHITE);      
+    tft1.print(heater_temp,1); 
+
+    //set flag to say the last number displayed was the target temp
+    last_temp_displayed = 0;
+   
+  } else {}
+
+  #ifdef DEBUG
+    printFrame(message); 
+    Serial.println("Heater Status");
+    Serial.print("HV Present: ");
+    Serial.print(hvPresent);
+    Serial.print(" Heater Active: ");
+    Serial.print(heating);
+    Serial.print(" Water Temperature: ");
+    Serial.print(heater_temp);
+    Serial.println("C");
+    Serial.println("");
+    Serial.println("Settings");
+    Serial.print(" Heating: ");
+    Serial.print(heating);
+    Serial.print(" Desired Water Temperature: ");
+    Serial.print(heater_target);
+    Serial.println("");
+    Serial.println(""); 
+  #endif  
+  
+}
+
   
 void soc_proc(CAN_FRAME *message) {
   #ifdef DEBUG
@@ -481,70 +581,7 @@ void soc_proc(CAN_FRAME *message) {
     }
   }
   
-void heater_proc(CAN_FRAME *message)  {
 
-  if(message->data.byte[0] == 0) {hvPresent = true;} else {hvPresent = false;} // HV present at heater
-  if(message->data.byte[1] > 0) {heater_enabled = true;} else {heater_enabled = false;} // Heater enabled
-  if(message->data.byte[2] > 0) {heating = true;} else {heating = false;} // Heating is active
-  
-  // top row do HV (green if enabled, red if heating) T (target temp) A (actual - green if heating)
-  tft1.setCursor(0,12);
-  tft1.setFont(&FreeSansBold9pt7b);
-  tft1.setTextSize(1);
-  if(heater_enabled && !heating){
-    tft1.setTextColor(ST77XX_GREEN);  
-  } else if (heater_enabled && heating){
-    tft1.setTextColor(ST77XX_RED);  
-  } else  {
-    tft1.setTextColor(ST77XX_WHITE);  
-  }
-  tft1.print("HE");   
-
-  if((message->data.byte[3]) != heater_temp) {
-    tft1.setCursor(50, 12);
-    tft1.setTextColor(ST77XX_BLACK);  
-    tft1.print(heater_temp,1);  
-    if(heating){
-      tft1.setTextColor(ST77XX_GREEN);  
-    } else {
-      tft1.setTextColor(ST77XX_RED);  
-    }  
-    heater_temp = message->data.byte[3]; // Water Temp
-    tft1.setCursor(50, 12);
-    tft1.print(heater_temp,1);  
-  }
-
-  if((message->data.byte[4]) != heater_target) {
-    tft1.setCursor(100, 12);
-    tft1.setTextColor(ST77XX_BLACK);  
-    tft1.print(heater_target,1);  
-    tft1.setTextColor(ST77XX_WHITE);  
-    heater_target = message->data.byte[4]; // Target Temp
-    tft1.setCursor(100, 12);
-    tft1.print(heater_target,1);  
-  }
-
-  #ifdef DEBUG
-    printFrame(message); 
-    Serial.println("Heater Status");
-    Serial.print("HV Present: ");
-    Serial.print(hvPresent);
-    Serial.print(" Heater Active: ");
-    Serial.print(heating);
-    Serial.print(" Water Temperature: ");
-    Serial.print(heater_temp);
-    Serial.println("C");
-    Serial.println("");
-    Serial.println("Settings");
-    Serial.print(" Heating: ");
-    Serial.print(heating);
-    Serial.print(" Desired Water Temperature: ");
-    Serial.print(heater_target);
-    Serial.println("");
-    Serial.println(""); 
-  #endif  
-  
-}
   
   void eml(){
     txFrame.rtr = 0;  
