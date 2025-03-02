@@ -48,7 +48,9 @@ unsigned char ABSMsg = 0x11; // This is recalculated on a timer so no input need
   
 // HEATER DATA
 bool hvPresent = false;
+bool heater_enabled = false;
 bool heating = false;
+
 unsigned char heater_temp;
 unsigned char heater_target;
 
@@ -199,7 +201,7 @@ void setup() {
   CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
   CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
   CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
-  CAN0.watchFor(0x398, 0xFFF); //setup a special filter to watch for only 0x398 to get heater info
+  CAN0.watchFor(0x300, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
   //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
   
   // Set callbacks for target IDs to process and update display
@@ -276,7 +278,7 @@ void tft1InitialDisplay() {
   tft1.setTextSize(1);
   tft1.setCursor(0,12);
   tft1.setTextColor(ST77XX_RED);  
-  tft1.print("HV");  
+  tft1.print("HE");  
   tft1.setCursor(30,12);
   tft1.setTextColor(ST77XX_WHITE);  
   tft1.print("T:");  
@@ -481,32 +483,25 @@ void soc_proc(CAN_FRAME *message) {
   
 void heater_proc(CAN_FRAME *message)  {
 
-  if(message->data.byte[5] > 0) {heating = true;} else {heating = false;} // Heating is active
-  if(message->data.byte[6] == 0) {hvPresent = true;} else {hvPresent = false;} // HV present at heater
+  if(message->data.byte[0] == 0) {hvPresent = true;} else {hvPresent = false;} // HV present at heater
+  if(message->data.byte[1] > 0) {heater_enabled = true;} else {heater_enabled = false;} // Heater enabled
+  if(message->data.byte[2] > 0) {heating = true;} else {heating = false;} // Heating is active
   
-  // top row do HV (green if enabled) T (target temp) A (actual - green if heating)
+  // top row do HV (green if enabled, red if heating) T (target temp) A (actual - green if heating)
   tft1.setCursor(0,12);
   tft1.setFont(&FreeSansBold9pt7b);
   tft1.setTextSize(1);
-  if(hvPresent){
+  if(heater_enabled && !heating){
     tft1.setTextColor(ST77XX_GREEN);  
-  } else {
+  } else if (heater_enabled && heating){
     tft1.setTextColor(ST77XX_RED);  
-  }
-  tft1.print("HV");   
-
-  if((message->data.byte[4] - 40) != heater_target) {
-    tft1.setCursor(50, 12);
-    tft1.setTextColor(ST77XX_BLACK);  
-    tft1.print(heater_target,1);  
+  } else  {
     tft1.setTextColor(ST77XX_WHITE);  
-    heater_target = message->data.byte[4] - 40; // Target Temp
-    tft1.setCursor(50, 12);
-    tft1.print(heater_target,1);  
   }
+  tft1.print("HE");   
 
-  if((message->data.byte[3] - 40) != heater_temp) {
-    tft1.setCursor(100, 12);
+  if((message->data.byte[3]) != heater_temp) {
+    tft1.setCursor(50, 12);
     tft1.setTextColor(ST77XX_BLACK);  
     tft1.print(heater_temp,1);  
     if(heating){
@@ -514,10 +509,21 @@ void heater_proc(CAN_FRAME *message)  {
     } else {
       tft1.setTextColor(ST77XX_RED);  
     }  
-    heater_temp = message->data.byte[3] - 40; // Water Temp
-    tft1.setCursor(100, 12);
+    heater_temp = message->data.byte[3]; // Water Temp
+    tft1.setCursor(50, 12);
     tft1.print(heater_temp,1);  
   }
+
+  if((message->data.byte[4]) != heater_target) {
+    tft1.setCursor(100, 12);
+    tft1.setTextColor(ST77XX_BLACK);  
+    tft1.print(heater_target,1);  
+    tft1.setTextColor(ST77XX_WHITE);  
+    heater_target = message->data.byte[4]; // Target Temp
+    tft1.setCursor(100, 12);
+    tft1.print(heater_target,1);  
+  }
+
   #ifdef DEBUG
     printFrame(message); 
     Serial.println("Heater Status");
