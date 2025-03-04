@@ -99,6 +99,7 @@ float p = 3.1415926;
   
 // Variables for displayed stats
 int soc;
+int soc_error_flag;
 int delta;
 float temp;
 
@@ -202,6 +203,8 @@ void setup() {
   CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
   CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
   CAN0.watchFor(0x300, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
+  CAN0.watchFor(0x389, 0xFFF); //setup a special filter to watch for only 0x389 to get charger info
+    
   //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
   
   // Set callbacks for target IDs to process and update display
@@ -209,6 +212,7 @@ void setup() {
   CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
   CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
   CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
+  CAN0.setCallback(4, charger_proc); //callback on third filter to trigger function to update display with charger info
 
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
@@ -318,6 +322,7 @@ void tft1InitialDisplay() {
   tft1.print("Waiting for");
   tft1.setCursor(10, 90);
   tft1.print("CAN...");
+  soc_error_flag = 1;
 }
 
 void tft2InitialDisplay() {
@@ -468,41 +473,79 @@ void heater_proc(CAN_FRAME *message)  {
   
 }
 
-  
+void charger_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
+    printFrame(message);
+  #endif
+  int charge_current;
+  if(message->data.byte[6] != charge_current){
+    // overwrite the last charge current printed in black
+    tft1.setTextColor(ST77XX_BLACK);        
+    tft1.setFont(&FreeSansBold9pt7b);
+    tft1.setTextSize(1);
+    tft1.setCursor(80,16);
+    tft1.print(charge_current);
+    tft1.print("A");      
+
+    //Set the new charge current
+    charge_current = message->data.byte[6];
+
+    //if it is greater than 0, write it out
+    if(charge_current > 0) { 
+      // Print charge current
+      tft1.setTextColor(ST77XX_WHITE);        
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.setTextSize(1);
+      tft1.setCursor(80,16);
+      tft1.print(charge_current);
+      tft1.print("A");
+      // Update charge icon to be green
+      tft1.drawChar(104,24,131,ST77XX_GREEN,0,1);
+    } else {    
+      // Update the charge icon to be white
+      tft1.drawChar(104,24,131,ST77XX_WHITE,0,1);
+    }
+  }
+}
+
 void soc_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
   #endif
-  tft1.setTextColor(ST77XX_WHITE);  
-  tft1.setFont(&FreeSansBold24pt7b);
-  tft1.setTextSize(1);
-  tft1.setCursor(10,70);
+    tft1.setFont(&FreeSansBold24pt7b);
+    tft1.setTextSize(1);
 
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
-    soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
-    if(soc > 100) {
+
+    if(soc_error_flag == 1){
       tft1.drawRect(0,16,128,100,ST77XX_BLACK);
       tft1.fillRect(0,16,128,100,ST77XX_BLACK);
+    } else {
+      tft1.setTextColor(ST77XX_BLACK);  
+      tft1.setCursor(10,70);  
+      tft1.print(soc);
+      }
+    soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
+    if(soc <= 100) {
+      tft1.setTextColor(ST77XX_BLACK);  
+      tft1.setCursor(10,70);  
+      tft1.print(soc);
+      tft1.print("%");
+      
+      #ifdef DEBUG
+      printf("SoC: ");
+      printf("%d%%", soc);
+      printf("\n");
+      #endif
+      soc_error_flag = 0;
+    } else {      
       tft1.print("...");
       #ifdef DEBUG
         printf("SoC error >> SoC: ");
         printf("%d%%", soc);
         printf("/n");
       #endif            
-    } else if(soc <= 100){
-      tft1.drawRect(0,16,128,100,ST77XX_BLACK);
-      tft1.fillRect(0,16,128,100,ST77XX_BLACK);
-      tft1.print(soc);
-      tft1.print("%");
-      #ifdef DEBUG
-        printf("SoC: ");
-        printf("%d%%", soc);
-        printf("\n");
-      #endif
-    } else {
-      tft1.setCursor(18,70);
-      tft1.print("N/A");
-    }  
+    }
   }
 }
   
