@@ -99,9 +99,11 @@ float p = 3.1415926;
   
 // Variables for displayed stats
 int soc;
-int soc_error_flag;
+int soc_error_flag = 0;
 int delta;
+int delta_error_flag = 0;
 float temp;
+int temp_error_flag = 0;
 
 // Task Scheduling
 void ms10Task();
@@ -289,7 +291,7 @@ void tft1InitialDisplay() {
   tft1.drawChar(104,24,131,0x9515,0,1);
 
 // Module temp icon
-  tft1.drawChar(0,160,129,0x9515,0,1);
+//  tft1.drawChar(0,160,129,0x9515,0,1);
 
 // Module delta icon
   tft1.drawChar(104,160,133,0x9515,0,1);
@@ -304,14 +306,8 @@ void tft1InitialDisplay() {
   tft1.setCursor(30, 16);
   tft1.print("30");
 // charge
-  tft1.setCursor(80, 16);
+  tft1.setCursor(76, 16);
   tft1.print("8A");
-// module temp
-  tft1.setCursor(30, 154);
-  tft1.print("5");
-// module delta
-  tft1.setCursor(80, 154);
-  tft1.print("9");
 #endif
 
 // SoC
@@ -483,7 +479,7 @@ void charger_proc(CAN_FRAME *message) {
     tft1.setTextColor(ST77XX_BLACK);        
     tft1.setFont(&FreeSansBold9pt7b);
     tft1.setTextSize(1);
-    tft1.setCursor(80,16);
+    tft1.setCursor(76,16);
     tft1.print(charge_current);
     tft1.print("A");      
 
@@ -496,7 +492,7 @@ void charger_proc(CAN_FRAME *message) {
       tft1.setTextColor(ST77XX_WHITE);        
       tft1.setFont(&FreeSansBold9pt7b);
       tft1.setTextSize(1);
-      tft1.setCursor(80,16);
+      tft1.setCursor(76,16);
       tft1.print(charge_current);
       tft1.print("A");
       // Update charge icon to be green
@@ -518,17 +514,17 @@ void soc_proc(CAN_FRAME *message) {
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
 
     if(soc_error_flag == 1){
-      tft1.drawRect(0,16,128,100,ST77XX_BLACK);
-      tft1.fillRect(0,16,128,100,ST77XX_BLACK);
+      tft1.drawRect(4,36,120,90,ST77XX_BLACK);
+      tft1.fillRect(4,36,120,90,ST77XX_BLACK);
     } else {
       tft1.setTextColor(ST77XX_BLACK);  
       tft1.setCursor(10,70);  
       tft1.print(soc);
       }
     soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
-    if(soc <= 100) {
-      tft1.setTextColor(ST77XX_BLACK);  
-      tft1.setCursor(10,70);  
+    if(soc < 101) {
+      tft1.setTextColor(ST77XX_WHITE);  
+      tft1.setCursor(10,80);  
       tft1.print(soc);
       tft1.print("%");
       
@@ -548,192 +544,207 @@ void soc_proc(CAN_FRAME *message) {
     }
   }
 }
-  
-  void temp_proc(CAN_FRAME *message) {
-    tft1.setTextColor(ST77XX_WHITE);  
 
+// Module Temp
+void temp_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
     printFrame(message);
-    if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
+  #endif
+
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextSize(1);
+  
+  if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
+    // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
+    tft1.setTextColor(ST77XX_BLACK);
+    tft1.setCursor(30, 153);
+    if (temp_error_flag == 0) {  
+      tft1.print(temp,1);
+    } else {
+      tft1.print("!");
+    }
+    
+    // set colour to white and print either data or error warning
+    tft1.setTextColor(ST77XX_WHITE);  
+    tft1.setCursor(30, 153);
+
+    if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 < 35) {
+      tft1.setFont(&ev_diy);
+      tft1.drawChar(0,160,129,0xFFFF,0,1);
       temp = (message->data.byte[4] + (message->data.byte[5] <<8))/10;  
-      // Module Temp
-      if(temp > 150) {
-        tft1.drawRect(13,120,51,40,ST77XX_BLACK);
-        tft1.fillRect(13,120,51,40,ST77XX_BLACK);
-        tft1.setCursor(16, 153);
-        tft1.setFont(&FreeSansBold9pt7b);
-        tft1.setTextSize(1);
-        tft1.print("ERR");
-        printf("Temp error >> Temp: ");
-        printf("%d%%", temp);
-        printf("/n");
-    } else if(temp) {
-        tft1.drawRect(13,120,51,40,ST77XX_BLACK);
-        tft1.fillRect(13,120,51,40,ST77XX_BLACK);
-        tft1.setCursor(16, 153);
-        tft1.setFont(&FreeSansBold9pt7b);
-        tft1.setTextSize(1);
-        tft1.print(temp);
+
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.print(temp,1);
+      #ifdef DEBUG 
         printf("Temp: ");
         printf("%d%%", temp);
         printf("/n");
-      } else {
-        tft1.drawRect(13,120,51,40,ST77XX_BLACK);
-        tft1.fillRect(13,120,51,40,ST77XX_BLACK);
-        tft1.setCursor(16, 153);
-        tft1.setFont(&FreeSansBold9pt7b);
-        tft1.setTextSize(1);
-        tft1.print("N/A");
-      }
+      #endif
+      temp_error_flag = 0;
+    } else {
+      tft1.setFont(&ev_diy);
+      tft1.drawChar(0,160,129,ST77XX_RED,0,1);
+      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.print("!");
+      temp_error_flag = 1;
+      #ifdef DEBUG        
+        printf("Temp error >> Temp: ");
+        printf("%d%%", temp);
+        printf("/n");
+      #endif
     }
   }
+}
   
-  void delta_proc(CAN_FRAME *message) {
-    printFrame(message);  
-    if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
-      delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
+void delta_proc(CAN_FRAME *message) {
+  #ifdef DEBUG 
+  printFrame(message);
+  #endif  
+
+  tft1.setFont(&FreeSansBold9pt7b);
+  tft1.setTextSize(1);
+
+  if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
+    tft1.setCursor(78, 153);
+
+    // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
+    tft1.setTextColor(ST77XX_BLACK);
+    if (delta_error_flag == 0) {  
+      tft1.print(delta);
+    } else {
+      tft1.print("!");
+    }
+
+    tft1.setTextColor(ST77XX_WHITE);  
+    tft1.setCursor(78, 153);
+    delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
     // Max Delta
-      if(delta < 0) {
-        tft1.drawRect(80,120,48,40,ST77XX_BLACK);
-        tft1.fillRect(80,120,48,40,ST77XX_BLACK);
-        tft1.setCursor(84, 153);
-        tft1.setFont(&FreeSansBold9pt7b);
-        tft1.setTextSize(1);
-        tft1.print("ERR");
+    if(delta < 0) {
+      tft1.print("!");
+      #ifdef DEBUG
         printf("Delta error >> Delta: ");
         printf("%d%%", delta);
-        printf("/n");    
-      } else if(delta) {
-        tft1.drawRect(80,120,48,40,ST77XX_BLACK);
-        tft1.fillRect(80,120,48,40,ST77XX_BLACK);
-        tft1.setCursor(84, 153);
-        tft1.setFont(&FreeSansBold9pt7b);
-        tft1.setTextSize(1);
-        tft1.print(delta);
-  //      tft1.print("mV");
+        printf("/n");
+      #endif    
+    } else {
+      tft1.print(delta);
+      #ifdef DEBUG 
         printf("Delta: ");
         printf("%d%%", delta);
-        printf("/n");    
-      } else {
-        tft1.drawRect(80,120,48,40,ST77XX_BLACK);
-        tft1.fillRect(80,120,48,40,ST77XX_BLACK);
-        tft1.setCursor(84, 153);
-        tft1.setFont(&FreeSansBold9pt7b);
-        tft1.setTextSize(1);
-        tft1.print("N/A");
-      }
+        printf("/n");
+      #endif
     }
   }
+}
   
+  
+void eml(){
+  txFrame.rtr = 0;  
+  txFrame.id = 0x545;
+  txFrame.length = 8;
+  txFrame.extended = false;
+  txFrame.data.uint8[0] = 0;//2-cel 16-eml 
+  txFrame.data.uint8[1] = 0x00;
+  txFrame.data.uint8[2] = 0x00;
+  txFrame.data.uint8[3] = 0;//overheat(8)
+  txFrame.data.uint8[4] = 0x7e;
+  txFrame.data.uint8[5] = 10;
+  txFrame.data.uint8[6] = 0;
+  txFrame.data.uint8[7] = 18;
+  CAN0.sendFrame(txFrame);
+}
+  
+void eng_speed() {
+  revCount = map(motorSpeed,0,10000,0 ,44800);
+  if (clusterStart == 0) {revCount = 4800;}
+  if (revCount <= 4800) {revCount = 4800;}
+  if (revCount >= 44800) {revCount = 44800;}
+  if (clusterStart == 1) {revCount = 44800; clusterStart = 0;}
+  
+  txFrame.rtr = 0;
+  txFrame.id = 0x316;
+  txFrame.length = 8;
+  txFrame.extended = false;
+  txFrame.data.uint8[0] = 13;//bit 0 should be 1
+  txFrame.data.uint8[1] = 0;
+  txFrame.data.uint8[2] = lowByte(revCount);//eng speed lsb
+  txFrame.data.uint8[3] = highByte(revCount);//eng speed msb
+  txFrame.data.uint8[4] = 0;
+  txFrame.data.uint8[5] = 0;
+  txFrame.data.uint8[6] = 0;
+  txFrame.data.uint8[7] = 0;
+  CAN0.sendFrame(txFrame);
+}
+  
+void asc() {
+  if(counter_329 >= 22) {counter_329 = 0;}
+  if(counter_329 == 0) { ABSMsg=0x11;}
+  if(counter_329 >= 8 && counter_329 < 15) {ABSMsg=0x86;}
+  if(counter_329 >= 15) {ABSMsg=0xd9;}
+  counter_329++;   
+  mt=map(motorTemp,0,40,90,254);
+  
+  txFrame.id  = 0x329;
+  txFrame.length = 8;
+  txFrame.extended = false;
+  txFrame.data.uint8[0] = ABSMsg;
+  txFrame.data.uint8[1] = mt;//motor temp 48-255 full scale
+  txFrame.data.uint8[2] = 0xc5;
+  txFrame.data.uint8[3] = 0;//engine status bit4 ,clutch bit0,engine run bit3,ack can bit2
+  txFrame.data.uint8[4] = 0;
+  txFrame.data.uint8[5] = accelPot;//throttle position 00-FE
+  txFrame.data.uint8[6] = brakeOn;//bit 0 brake on
+  txFrame.data.uint8[7] = 0x0;
+  CAN0.sendFrame(txFrame);
+}
+  
+void onOTAStart() {
+  // Log when OTA has started
+  Serial.println("OTA update started!");
+  // <Add your own code here>
+}
 
-  
-  void eml(){
-    txFrame.rtr = 0;  
-    txFrame.id = 0x545;
-    txFrame.length = 8;
-    txFrame.extended = false;
-    txFrame.data.uint8[0] = 0;//2-cel 16-eml 
-    txFrame.data.uint8[1] = 0x00;
-    txFrame.data.uint8[2] = 0x00;
-    txFrame.data.uint8[3] = 0;//overheat(8)
-    txFrame.data.uint8[4] = 0x7e;
-    txFrame.data.uint8[5] = 10;
-    txFrame.data.uint8[6] = 0;
-    txFrame.data.uint8[7] = 18;
-    CAN0.sendFrame(txFrame);
+void onOTAProgress(size_t current, size_t final) {
+  // Log every 1 second
+  if (millis() - ota_progress_millis > 1000) {
+    ota_progress_millis = millis();
+    Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
   }
+}
   
-  void eng_speed() {
-    revCount = map(motorSpeed,0,10000,0 ,44800);
-    if (clusterStart == 0) {revCount = 4800;}
-    if (revCount <= 4800) {revCount = 4800;}
-    if (revCount >= 44800) {revCount = 44800;}
-    if (clusterStart == 1) {revCount = 44800; clusterStart = 0;}
-  
-    txFrame.rtr = 0;
-    txFrame.id = 0x316;
-    txFrame.length = 8;
-    txFrame.extended = false;
-    txFrame.data.uint8[0] = 13;//bit 0 should be 1
-    txFrame.data.uint8[1] = 0;
-    txFrame.data.uint8[2] = lowByte(revCount);//eng speed lsb
-    txFrame.data.uint8[3] = highByte(revCount);//eng speed msb
-    txFrame.data.uint8[4] = 0;
-    txFrame.data.uint8[5] = 0;
-    txFrame.data.uint8[6] = 0;
-    txFrame.data.uint8[7] = 0;
-    CAN0.sendFrame(txFrame);
+void onOTAEnd(bool success) {
+  // Log when OTA has finished
+  if (success) {
+    Serial.println("OTA update finished successfully!");
+  } else {
+    Serial.println("There was an error during OTA update!");
   }
+  // <Add your own code here>
+}
   
-  void asc() {
-    if(counter_329 >= 22) {counter_329 = 0;}
-    if(counter_329 == 0) { ABSMsg=0x11;}
-    if(counter_329 >= 8 && counter_329 < 15) {ABSMsg=0x86;}
-    if(counter_329 >= 15) {ABSMsg=0xd9;}
-    counter_329++;
-  
-    mt=map(motorTemp,0,40,90,254);
-  
-    txFrame.id  = 0x329;
-    txFrame.length = 8;
-    txFrame.extended = false;
-    txFrame.data.uint8[0] = ABSMsg;
-    txFrame.data.uint8[1] = mt;//motor temp 48-255 full scale
-    txFrame.data.uint8[2] = 0xc5;
-    txFrame.data.uint8[3] = 0;//engine status bit4 ,clutch bit0,engine run bit3,ack can bit2
-    txFrame.data.uint8[4] = 0;
-    txFrame.data.uint8[5] = accelPot;//throttle position 00-FE
-    txFrame.data.uint8[6] = brakeOn;//bit 0 brake on
-    txFrame.data.uint8[7] = 0x0;
-    CAN0.sendFrame(txFrame);
+void backlight_ramp_up() {
+  for(int dutyCycle = 0; dutyCycle < 255; dutyCycle++){   
+    // changing the LED brightness with PWM
+    ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
+    ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
+    delay(5);
   }
-  
-  void onOTAStart() {
-    // Log when OTA has started
-    Serial.println("OTA update started!");
-    // <Add your own code here>
-  }
-  
-  void onOTAProgress(size_t current, size_t final) {
-    // Log every 1 second
-    if (millis() - ota_progress_millis > 1000) {
-      ota_progress_millis = millis();
-      Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
-    }
-  }
-  
-  void onOTAEnd(bool success) {
-    // Log when OTA has finished
-    if (success) {
-      Serial.println("OTA update finished successfully!");
-    } else {
-      Serial.println("There was an error during OTA update!");
-    }
-    // <Add your own code here>
-  }
-  
-  void backlight_ramp_up() {
-    for(int dutyCycle = 0; dutyCycle < 255; dutyCycle++){   
-      // changing the LED brightness with PWM
-      ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
-      ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
-      delay(5);
-    }
-      ledcWrite(TFT_1_BLK_CHAN, 255);
-      ledcWrite(TFT_2_BLK_CHAN, 255);
-      return;
-  }
-  
-  void backlight_ramp_down() {
-    for(int dutyCycle = 255; dutyCycle > 0; dutyCycle--){   
-      // changing the LED brightness with PWM
-      ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
-      ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
-      delay(5);
-    }
-      ledcWrite(TFT_1_BLK_CHAN, 0);
-      ledcWrite(TFT_2_BLK_CHAN, 0);
+    ledcWrite(TFT_1_BLK_CHAN, 255);
+    ledcWrite(TFT_2_BLK_CHAN, 255);
     return;
+}
+  
+void backlight_ramp_down() {
+  for(int dutyCycle = 255; dutyCycle > 0; dutyCycle--){   
+    // changing the LED brightness with PWM
+    ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
+    ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
+    delay(5);
   }
+    ledcWrite(TFT_1_BLK_CHAN, 0);
+    ledcWrite(TFT_2_BLK_CHAN, 0);
+  return;
+}
 
 
 void ms10Task() {
