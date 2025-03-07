@@ -58,7 +58,6 @@ unsigned char heater_target;
 AsyncWebServer server(80);
   
 // Include fonts for display
-#include <Fonts/FreeSansBold9pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
@@ -284,24 +283,25 @@ void tft1InitialDisplay() {
 // Select custom icon font
   tft1.setFont(&ev_diy);
 
+// Set font size - now consistent throughout
+  tft1.setTextSize(1);
+  
 // Heater icon
   tft1.drawChar(0,24,128,0x9515,0,1);
 
 // Charge icon
-  tft1.drawChar(104,24,131,0x9515,0,1);
+  tft1.drawChar(104,24,129,0x9515,0,1);
 
 // Module temp icon
-//  tft1.drawChar(0,160,129,0x9515,0,1);
+  tft1.drawChar(0,160,130,0x9515,0,1);
 
 // Module delta icon
-  tft1.drawChar(104,160,133,0x9515,0,1);
-
-// Set normal font - could integrate with symbol font to save space
-  tft1.setFont(&FreeSansBold9pt7b);
-  tft1.setTextColor(0x9515);
+  tft1.drawChar(104,160,131,0x9515,0,1);
 
 // test text
 #ifdef DEBUG
+  tft1.setTextColor(0x9515);
+
 //heater
   tft1.setCursor(30, 16);
   tft1.print("30");
@@ -314,7 +314,6 @@ void tft1InitialDisplay() {
   tft1.drawRoundRect(2, 32, 124, 98, 5, ST77XX_WHITE);
   tft1.setTextColor(ST77XX_WHITE);
   tft1.setCursor(10, 70);
-  tft1.setTextSize(1);
   tft1.print("Waiting for");
   tft1.setCursor(10, 90);
   tft1.print("CAN...");
@@ -322,30 +321,25 @@ void tft1InitialDisplay() {
 }
 
 void tft2InitialDisplay() {
+  tft2.setFont(&ev_diy);
+  tft2.setTextSize(1);
 
   // Initial display of SoC before data arrives
   tft2.setCursor(0,12);
-  tft2.setFont(&FreeSansBold9pt7b);
-  tft2.setTextSize(1);
   tft2.setTextColor(ST77XX_RED);  
   tft2.print("HV");  
+  
   tft2.setCursor(30,15);
-  tft2.setFont(&FreeSansBold9pt7b);
-  tft2.setTextSize(1);
   tft2.setTextColor(ST77XX_RED);  
   tft2.print("HE");  
+  
   tft2.setCursor(60,15);
-  tft2.setFont(&FreeSansBold9pt7b);
-  tft2.setTextSize(1);
   tft2.setTextColor(ST77XX_WHITE);  
   tft2.print("TAR");  
   
-  //  tft1.setFont(&FreeSansBold24pt7b);
   //  tft1.setCursor(20, 70);
   //  tft1.setTextSize(1);
-  tft2.setFont(&FreeSansBold9pt7b);
   tft2.setCursor(10, 70);
-  tft2.setTextSize(1);
   tft2.print("Waiting for");
   tft2.setCursor(10, 90);
   tft2.print("CAN...");
@@ -353,8 +347,6 @@ void tft2InitialDisplay() {
   // Initial display of max delta before data arrives
   tft2.fillTriangle(68, 154, 74, 135, 80, 154, ST77XX_BLUE);
   tft2.setCursor(84, 153);
-  tft2.setFont(&FreeSansBold12pt7b);
-  tft2.setTextSize(1);
   tft2.print("N/A");
   
   // Initial display of module temp before data arrives
@@ -362,8 +354,6 @@ void tft2InitialDisplay() {
   tft2.fillCircle(8, 150, 4, ST77XX_RED);
   tft2.fillRect(6, 140, 5, 6, ST77XX_RED);
   tft2.setCursor(16, 153);
-  tft2.setFont(&FreeSansBold12pt7b);
-  tft2.setTextSize(1);
   tft2.print("N/A");   
 }
 
@@ -392,8 +382,6 @@ void heater_proc(CAN_FRAME *message)  {
   
   // top row do HV (green if enabled, red if heating) T (target temp) A (actual - green if heating)
   tft1.setCursor(0,12);
-  tft1.setFont(&FreeSansBold9pt7b);
-  tft1.setTextSize(1);
   if(heater_enabled && !heating){
     tft1.drawChar(0,16,128,ST77XX_WHITE,0,1);
   } else if (heater_enabled && heating){
@@ -477,8 +465,6 @@ void charger_proc(CAN_FRAME *message) {
   if(message->data.byte[6] != charge_current){
     // overwrite the last charge current printed in black
     tft1.setTextColor(ST77XX_BLACK);        
-    tft1.setFont(&FreeSansBold9pt7b);
-    tft1.setTextSize(1);
     tft1.setCursor(76,16);
     tft1.print(charge_current);
     tft1.print("A");      
@@ -490,16 +476,14 @@ void charger_proc(CAN_FRAME *message) {
     if(charge_current > 0) { 
       // Print charge current
       tft1.setTextColor(ST77XX_WHITE);        
-      tft1.setFont(&FreeSansBold9pt7b);
-      tft1.setTextSize(1);
       tft1.setCursor(76,16);
       tft1.print(charge_current);
       tft1.print("A");
       // Update charge icon to be green
-      tft1.drawChar(104,24,131,ST77XX_GREEN,0,1);
+      tft1.drawChar(104,24,129,ST77XX_GREEN,0,1);
     } else {    
       // Update the charge icon to be white
-      tft1.drawChar(104,24,131,ST77XX_WHITE,0,1);
+      tft1.drawChar(104,24,129,ST77XX_WHITE,0,1);
     }
   }
 }
@@ -508,8 +492,6 @@ void soc_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
   #endif
-    tft1.setFont(&FreeSansBold24pt7b);
-    tft1.setTextSize(1);
 
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
 
@@ -550,9 +532,6 @@ void temp_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
   #endif
-
-  tft1.setFont(&FreeSansBold9pt7b);
-  tft1.setTextSize(1);
   
   if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
     // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
@@ -569,11 +548,8 @@ void temp_proc(CAN_FRAME *message) {
     tft1.setCursor(30, 153);
 
     if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 < 35) {
-      tft1.setFont(&ev_diy);
-      tft1.drawChar(0,160,129,0xFFFF,0,1);
+      tft1.drawChar(0,160,130,0xFFFF,0,1);
       temp = (message->data.byte[4] + (message->data.byte[5] <<8))/10;  
-
-      tft1.setFont(&FreeSansBold9pt7b);
       tft1.print(temp,1);
       #ifdef DEBUG 
         printf("Temp: ");
@@ -582,9 +558,7 @@ void temp_proc(CAN_FRAME *message) {
       #endif
       temp_error_flag = 0;
     } else {
-      tft1.setFont(&ev_diy);
-      tft1.drawChar(0,160,129,ST77XX_RED,0,1);
-      tft1.setFont(&FreeSansBold9pt7b);
+      tft1.drawChar(0,160,130,ST77XX_RED,0,1);
       tft1.print("!");
       temp_error_flag = 1;
       #ifdef DEBUG        
@@ -601,9 +575,6 @@ void delta_proc(CAN_FRAME *message) {
   printFrame(message);
   #endif  
 
-  tft1.setFont(&FreeSansBold9pt7b);
-  tft1.setTextSize(1);
-
   if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
     tft1.setCursor(78, 153);
 
@@ -614,25 +585,37 @@ void delta_proc(CAN_FRAME *message) {
     } else {
       tft1.print("!");
     }
-
-    tft1.setTextColor(ST77XX_WHITE);  
     tft1.setCursor(78, 153);
     delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
     // Max Delta
-    if(delta < 0) {
-      tft1.print("!");
-      #ifdef DEBUG
-        printf("Delta error >> Delta: ");
-        printf("%d%%", delta);
-        printf("/n");
-      #endif    
-    } else {
+
+    if(delta > 0 || delta < 50) {
+      tft1.drawChar(0,160,130,ST77XX_WHITE,0,1);      
+      tft1.setTextColor(ST77XX_WHITE);        
       tft1.print(delta);
       #ifdef DEBUG 
         printf("Delta: ");
         printf("%d%%", delta);
         printf("/n");
       #endif
+    } else if(delta > 50) {  
+      tft1.drawChar(0,160,130,0xFA80,0,1);
+      tft1.setTextColor(0xFA80);        
+      tft1.print(delta);
+      #ifdef DEBUG
+        printf("Delta warning >> Delta: ");
+        printf("%d%%", delta);
+        printf("/n");
+      #endif    
+    } else {
+      tft1.drawChar(0,160,130,ST77XX_RED,0,1);
+      tft1.setTextColor(ST77XX_RED);        
+      tft1.print("!");
+      #ifdef DEBUG
+        printf("Delta error >> Delta: ");
+        printf("%d%%", delta);
+        printf("/n");
+      #endif 
     }
   }
 }
