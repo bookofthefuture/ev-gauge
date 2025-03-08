@@ -277,6 +277,8 @@ void loop() {
   
   }
 
+///////////////////////////////////////////////// TFT1 INITIAL DISPLAY ////////////////////////////////////////////////////////////
+
 void tft1InitialDisplay() {
 // Initial display before data arrives
 
@@ -320,6 +322,9 @@ void tft1InitialDisplay() {
   soc_error_flag = 1;
 }
 
+///////////////////////////////////////////////// TFT2 INITIAL DISPLAY ////////////////////////////////////////////////////////////
+
+
 void tft2InitialDisplay() {
   tft2.setFont(&ev_diy_font);
   tft2.setTextSize(1);
@@ -357,6 +362,9 @@ void tft2InitialDisplay() {
   tft2.print("N/A");   
 }
 
+///////////////////////////////////////////////// PRINTFRAME ////////////////////////////////////////////////////////////
+
+
 void printFrame(CAN_FRAME *message)
   {
     Serial.print(message->id, HEX);
@@ -370,6 +378,9 @@ void printFrame(CAN_FRAME *message)
     }
     Serial.println();
   }
+
+///////////////////////////////////////////////// HEATER PROC ////////////////////////////////////////////////////////////
+  
 
 void heater_proc(CAN_FRAME *message)  {
   
@@ -457,6 +468,9 @@ void heater_proc(CAN_FRAME *message)  {
   
 }
 
+///////////////////////////////////////////////// CHARGER PROC ////////////////////////////////////////////////////////////
+
+
 void charger_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
@@ -487,6 +501,9 @@ void charger_proc(CAN_FRAME *message) {
     }
   }
 }
+
+///////////////////////////////////////////////// SOC PROC ////////////////////////////////////////////////////////////
+
 
 void soc_proc(CAN_FRAME *message) {
   #ifdef DEBUG
@@ -526,6 +543,9 @@ void soc_proc(CAN_FRAME *message) {
     }
   }
 }
+
+///////////////////////////////////////////////// TEMP PROC ///////////////////////////////////////////////////////////
+
 
 // Module Temp
 void temp_proc(CAN_FRAME *message) {
@@ -569,6 +589,9 @@ void temp_proc(CAN_FRAME *message) {
     }
   }
 }
+
+///////////////////////////////////////////////// DELTA PROC ////////////////////////////////////////////////////////////
+
   
 void delta_proc(CAN_FRAME *message) {
   #ifdef DEBUG 
@@ -576,20 +599,23 @@ void delta_proc(CAN_FRAME *message) {
   #endif  
 
   if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
-    tft1.setCursor(78, 153);
 
     // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
+    tft1.setCursor(78, 153);
     tft1.setTextColor(ST77XX_BLACK);
     if (delta_error_flag == 0) {  
       tft1.print(delta);
     } else {
       tft1.print("!");
     }
+
+    // reset the cursor, set delta
     tft1.setCursor(78, 153);
     delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
     // Max Delta
 
-    if(delta > 0 || delta < 50) {
+    // if delta is within expected range, just print it in white
+    if(delta > 0 && delta < 50) {
       tft1.drawChar(0,160,130,ST77XX_WHITE,0,1);      
       tft1.setTextColor(ST77XX_WHITE);        
       tft1.print(delta);
@@ -598,6 +624,8 @@ void delta_proc(CAN_FRAME *message) {
         printf("%d%%", delta);
         printf("/n");
       #endif
+
+      // if delta is high, print it in a warning orange
     } else if(delta > 50) {  
       tft1.drawChar(0,160,130,0xFA80,0,1);
       tft1.setTextColor(0xFA80);        
@@ -607,6 +635,8 @@ void delta_proc(CAN_FRAME *message) {
         printf("%d%%", delta);
         printf("/n");
       #endif    
+
+      // if delta is below 0 there is an error, so print it in red
     } else {
       tft1.drawChar(0,160,130,ST77XX_RED,0,1);
       tft1.setTextColor(ST77XX_RED);        
@@ -619,6 +649,8 @@ void delta_proc(CAN_FRAME *message) {
     }
   }
 }
+
+///////////////////////////////////////////////// EML - TURN OFF ENGINE MANAGEMENT LIGHT ////////////////////////////////////////////////////////////
   
   
 void eml(){
@@ -636,6 +668,8 @@ void eml(){
   txFrame.data.uint8[7] = 18;
   CAN0.sendFrame(txFrame);
 }
+
+///////////////////////////////////////////////// ENG_SPEED: TRANSLATE MOTOR SPEED INTO REVS - USE FOR CURRENT LATER  ////////////////////////////////////////////////////////////
   
 void eng_speed() {
   revCount = map(motorSpeed,0,10000,0 ,44800);
@@ -658,6 +692,9 @@ void eng_speed() {
   txFrame.data.uint8[7] = 0;
   CAN0.sendFrame(txFrame);
 }
+
+///////////////////////////////////////////////// ASC - BLUFF STABILITY CONTROL SYSTEM  ////////////////////////////////////////////////////////////
+
   
 void asc() {
   if(counter_329 >= 22) {counter_329 = 0;}
@@ -680,6 +717,9 @@ void asc() {
   txFrame.data.uint8[7] = 0x0;
   CAN0.sendFrame(txFrame);
 }
+
+///////////////////////////////////////////////// OTA FUNCTIONS  ////////////////////////////////////////////////////////////
+
   
 void onOTAStart() {
   // Log when OTA has started
@@ -704,6 +744,9 @@ void onOTAEnd(bool success) {
   }
   // <Add your own code here>
 }
+
+///////////////////////////////////////////////// BACKLIGHT RAMP UP/DOWN  ////////////////////////////////////////////////////////////
+
   
 void backlight_ramp_up() {
   for(int dutyCycle = 0; dutyCycle < 255; dutyCycle++){   
@@ -728,6 +771,8 @@ void backlight_ramp_down() {
     ledcWrite(TFT_2_BLK_CHAN, 0);
   return;
 }
+
+///////////////////////////////////////////////// TIMER TASK  ////////////////////////////////////////////////////////////
 
 
 void ms10Task() {
