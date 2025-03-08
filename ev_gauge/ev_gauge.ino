@@ -522,10 +522,13 @@ void soc_proc(CAN_FRAME *message) {
       }
     soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
     if(soc < 101) {
-      tft1.setTextColor(ST77XX_WHITE);  
+      tft1.setTextColor(ST77XX_WHITE);
+      tft1.setFont(&FreeSansBold24pt7b);
+//      tft1.setTextSize(1);
       tft1.setCursor(10,80);  
       tft1.print(soc);
       tft1.print("%");
+      tft1.setFont(&ev_diy_font);
       
       #ifdef DEBUG
       printf("SoC: ");
@@ -616,7 +619,7 @@ void delta_proc(CAN_FRAME *message) {
 
     // if delta is within expected range, just print it in white
     if(delta > 0 && delta < 50) {
-      tft1.drawChar(0,160,130,ST77XX_WHITE,0,1);      
+      tft1.drawChar(104,160,131,ST77XX_WHITE,0,1);
       tft1.setTextColor(ST77XX_WHITE);        
       tft1.print(delta);
       #ifdef DEBUG 
@@ -627,7 +630,7 @@ void delta_proc(CAN_FRAME *message) {
 
       // if delta is high, print it in a warning orange
     } else if(delta > 50) {  
-      tft1.drawChar(0,160,130,0xFA80,0,1);
+      tft1.drawChar(104,160,131,0xFA80,0,1);
       tft1.setTextColor(0xFA80);        
       tft1.print(delta);
       #ifdef DEBUG
@@ -638,7 +641,7 @@ void delta_proc(CAN_FRAME *message) {
 
       // if delta is below 0 there is an error, so print it in red
     } else {
-      tft1.drawChar(0,160,130,ST77XX_RED,0,1);
+      tft1.drawChar(104,160,131,ST77XX_RED,0,1);
       tft1.setTextColor(ST77XX_RED);        
       tft1.print("!");
       #ifdef DEBUG
