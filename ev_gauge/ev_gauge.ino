@@ -61,7 +61,7 @@ AsyncWebServer server(80);
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold24pt7b.h>
-#include <Fonts/ev_diy.h>
+#include "ev_diy_font.h"
 
 
 // Configure i2c pins for display - 30 pin layout
@@ -281,7 +281,7 @@ void tft1InitialDisplay() {
 // Initial display before data arrives
 
 // Select custom icon font
-  tft1.setFont(&ev_diy);
+  tft1.setFont(&ev_diy_font);
 
 // Set font size - now consistent throughout
   tft1.setTextSize(1);
@@ -321,7 +321,7 @@ void tft1InitialDisplay() {
 }
 
 void tft2InitialDisplay() {
-  tft2.setFont(&ev_diy);
+  tft2.setFont(&ev_diy_font);
   tft2.setTextSize(1);
 
   // Initial display of SoC before data arrives
