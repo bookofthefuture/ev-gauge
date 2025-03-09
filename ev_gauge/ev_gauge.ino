@@ -25,7 +25,7 @@
 // Image reader
 SPIFFS_ImageReader reader;
   
-#define DEBUG;
+#define DEBUG
   
 // OTA CONFIG
 const char* ssid = "gaugedriver";
@@ -103,6 +103,9 @@ int delta;
 int delta_error_flag = 0;
 float temp;
 int temp_error_flag = 0;
+int temp_display_delay; // allows for target temp to still be shown for a short delay after you stop twiddling the knob to set it
+int display_temp;
+
 
 // Task Scheduling
 void ms10Task();
@@ -305,8 +308,8 @@ void tft1InitialDisplay() {
   tft1.setTextColor(0x9515);
 
 //heater
-  tft1.setCursor(30, 16);
-  tft1.print("30");
+//  tft1.setCursor(30, 16);
+//  tft1.print("30");
 // charge
   tft1.setCursor(76, 16);
   tft1.print("8A");
@@ -383,68 +386,78 @@ void printFrame(CAN_FRAME *message)
   
 
 void heater_proc(CAN_FRAME *message)  {
-  
-  int last_temp_displayed; //set to 1 if target and 0 if actual. Target temp only shown when it changes and stays on screen for a couple of seconds
-  int temp_display_delay; // allows for target temp to still be shown for a short delay after you stop twiddling the knob to set it
-  
+  #ifdef DEBUG
+    printFrame(message);
+  #endif      
+
+  // check the heater status
   if(message->data.byte[0] == 0) {hvPresent = true;} else {hvPresent = false;} // HV present at heater
   if(message->data.byte[1] > 0) {heater_enabled = true;} else {heater_enabled = false;} // Heater enabled
   if(message->data.byte[2] > 0) {heating = true;} else {heating = false;} // Heating is active
-  
-  // top row do HV (green if enabled, red if heating) T (target temp) A (actual - green if heating)
-  tft1.setCursor(0,12);
-  if(heater_enabled && !heating){
-    tft1.drawChar(0,16,128,ST77XX_WHITE,0,1);
-  } else if (heater_enabled && heating){
-    tft1.drawChar(0,16,128,0xFA80,0,1);
-  } else  {
-    tft1.drawChar(0,16,128,0x9515,0,1);
+
+  //  set the icon colour based on status
+  if(heater_enabled) {
+    if (heating){
+      tft1.drawChar(0,24,128,0xFA80,0,1);
+    } else {
+    tft1.drawChar(0,24,128,ST77XX_WHITE,0,1);
+    } 
+  } else {
+    tft1.drawChar(0,24,128,0x9515,0,1);
   }
 
-  // if the target temp has changed, temporarily overwrite the temp display with that
-  if((message->data.byte[4]) != heater_target || millis() - temp_display_delay < 1000) {
-    // set the cursor to the right position
-    tft1.setCursor(30, 16);
-    //overwrite the old number in black - last_temp_displayed tells you which number
-    tft1.setTextColor(ST77XX_BLACK);  
-    if(last_temp_displayed == 1) {
-      tft1.print(heater_target,1);  
-      // set the new number
-    } else {
-      tft1.print(heater_temp,1);
-      temp_display_delay = millis();     
-    }
-
-    //write the new number in green for target temp
-    tft1.setTextColor(ST77XX_GREEN);  
-    tft1.setCursor(30, 16);
-    tft1.print(heater_target,1);  
-
-    //set flag to say the last number displayed was the target temp
-    last_temp_displayed = 1;
-
-    // or if the target temp hasn't changed, show the actual
-  } else if((message->data.byte[3]) != heater_temp) {
-    // set the cursor to the right position
-    tft1.setCursor(30, 16);
-    //overwrite the old number in black - last_temp_displayed tells you which number
-    tft1.setTextColor(ST77XX_BLACK);  
-    if(last_temp_displayed == 1) {
-      tft1.print(heater_target,1);  
-    } else {
-      tft1.print(heater_temp,1);     
-    }
+  // check if either temperature has changed and erase the previous display
+  if (message->data.byte[3] != heater_temp || message->data.byte[4] != heater_target) {
     
-    //write the new number in white for actual temp
-    heater_temp = message->data.byte[3]; // Water Temp
+    // set the cursor to the right position
     tft1.setCursor(30, 16);
-    tft1.setTextColor(ST77XX_WHITE);      
-    tft1.print(heater_temp,1); 
+    
+    //overwrite the old number in black
+    tft1.setTextColor(ST77XX_BLACK);  
+    tft1.print(display_temp);
+  
+    // if the target temp has changed, or it has been less than a second since it changed, that's the most important thing to display
+    if((message->data.byte[4]) != heater_target) {
 
-    //set flag to say the last number displayed was the target temp
-    last_temp_displayed = 0;
-   
-  } else {}
+      // set the variable
+      heater_target = message->data.byte[4];
+
+      // make that the display temperature
+      display_temp = heater_target;
+
+      //set the colour to green
+      tft1.setTextColor(ST77XX_GREEN);  
+
+      //reset the counter for displaying the target tempm after it has been changed
+      temp_display_delay = millis();     
+
+      // if it has been less than a second since the last update to the target temp, keep showing it
+      } else if(millis() - temp_display_delay < 1000) {
+      
+      // note you shouldn't have to do anything here. display_temp should still be the last target_temp. But just in case
+      display_temp = heater_target;
+
+      //set the colour to green
+      tft1.setTextColor(ST77XX_GREEN);  
+     
+      } else {
+      
+      // if the target temp hasn't changed and it's more than a second since it did, show the actual temp
+      heater_temp = message->data.byte[3];    
+
+      // make that the display temperature
+      display_temp = heater_temp;
+
+      //set the colour to white
+      tft1.setTextColor(ST77XX_WHITE);  
+      }
+      
+      // display the relevant temperature
+      tft1.setCursor(30, 16);
+      tft1.print(display_temp,1);
+  } else {
+    // do nothing if nothing has changed
+    }
 
   #ifdef DEBUG
     printFrame(message); 
