@@ -25,7 +25,7 @@
 // Image reader
 SPIFFS_ImageReader reader;
   
-#define DEBUG
+//#define DEBUG
   
 // OTA CONFIG
 const char* ssid = "gaugedriver";
@@ -525,23 +525,25 @@ void soc_proc(CAN_FRAME *message) {
 
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
 
+    tft1.setFont(&FreeSansBold24pt7b);
+
     if(soc_error_flag == 1){
       tft1.drawRect(4,36,120,90,ST77XX_BLACK);
       tft1.fillRect(4,36,120,90,ST77XX_BLACK);
     } else {
       tft1.setTextColor(ST77XX_BLACK);  
-      tft1.setCursor(10,70);  
-      tft1.print(soc);
-      }
-    soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
-    if(soc < 101) {
-      tft1.setTextColor(ST77XX_WHITE);
-      tft1.setFont(&FreeSansBold24pt7b);
-//      tft1.setTextSize(1);
       tft1.setCursor(10,80);  
       tft1.print(soc);
       tft1.print("%");
-      tft1.setFont(&ev_diy_font);
+      }
+    soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
+    tft1.setCursor(10,80);  
+    tft1.setTextColor(ST77XX_WHITE);
+
+    if(soc < 101) {
+//      tft1.setTextSize(1);
+      tft1.print(soc);
+      tft1.print("%");
       
       #ifdef DEBUG
       printf("SoC: ");
@@ -551,12 +553,14 @@ void soc_proc(CAN_FRAME *message) {
       soc_error_flag = 0;
     } else {      
       tft1.print("...");
+      soc_error_flag = 1;
       #ifdef DEBUG
         printf("SoC error >> SoC: ");
         printf("%d%%", soc);
         printf("/n");
       #endif            
     }
+    tft1.setFont(&ev_diy_font);
   }
 }
 
