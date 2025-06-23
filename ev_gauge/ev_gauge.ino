@@ -105,6 +105,16 @@ float temp;
 int temp_error_flag = 0;
 int temp_display_delay; // allows for target temp to still be shown for a short delay after you stop twiddling the knob to set it
 int display_temp;
+int charge_current = 0; // Fix: Initialize charge_current globally
+
+// Reliability improvements
+unsigned long last_can_soc = 0;
+unsigned long last_can_temp = 0;
+unsigned long last_can_delta = 0;
+unsigned long last_can_heater = 0;
+unsigned long last_can_charger = 0;
+const unsigned long CAN_TIMEOUT_MS = 5000; // 5 second timeout
+bool display_init_success = false;
 
 
 // Task Scheduling
@@ -137,13 +147,35 @@ void setup() {
     while (1);
   }  
 
-  // Initialise 1.8" TFT screen:
-  tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-  tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-
+  // Initialise 1.8" TFT screen with error checking:
+  bool tft1_ok = true;
+  bool tft2_ok = true;
+  
+  try {
+    tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
+    tft1.fillScreen(ST77XX_BLACK);   // Test display 1
+  } catch (...) {
+    tft1_ok = false;
+    Serial.println("TFT1 initialization failed!");
+  }
+  
+  try {
+    tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab  
+    tft2.fillScreen(ST77XX_BLACK);   // Test display 2
+  } catch (...) {
+    tft2_ok = false;
+    Serial.println("TFT2 initialization failed!");
+  }
+  
+  display_init_success = tft1_ok && tft2_ok;
+  
   Serial.print(millis());
   Serial.print("\t");
-  Serial.println("TFT Init complete");
+  if (display_init_success) {
+    Serial.println("TFT Init complete - Both displays OK");
+  } else {
+    Serial.println("TFT Init WARNING - Some displays failed");
+  }
 
   // Setup backlights and set to black
   ledcSetup(TFT_1_BLK_CHAN, TFT_FREQ, RESOLUTION);  
@@ -151,7 +183,7 @@ void setup() {
   ledcAttachPin(TFT_1_BLK, TFT_1_BLK_CHAN);
   ledcAttachPin(TFT_2_BLK, TFT_2_BLK_CHAN);
   ledcWrite(TFT_1_BLK_CHAN, 0);
-  ledcWrite(TFT_1_BLK_CHAN, 0);
+  ledcWrite(TFT_2_BLK_CHAN, 0); // Fix: Use correct channel for display 2
 
   Serial.print(millis());
   Serial.print("\t");
@@ -217,6 +249,14 @@ void setup() {
   CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
   CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
   CAN0.setCallback(4, charger_proc); //callback on third filter to trigger function to update display with charger info
+  
+  // Initialize timeout counters to current time to prevent false timeouts on startup
+  unsigned long startup_time = millis();
+  last_can_soc = startup_time;
+  last_can_temp = startup_time;
+  last_can_delta = startup_time;
+  last_can_heater = startup_time;
+  last_can_charger = startup_time;
 
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, password);
@@ -388,7 +428,9 @@ void printFrame(CAN_FRAME *message)
 void heater_proc(CAN_FRAME *message)  {
   #ifdef DEBUG
     printFrame(message);
-  #endif      
+  #endif
+  
+  last_can_heater = millis(); // Update last received time      
 
   // check the heater status
   if(message->data.byte[0] == 0) {hvPresent = true;} else {hvPresent = false;} // HV present at heater
@@ -489,7 +531,9 @@ void charger_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
   #endif
-  int charge_current;
+  
+  last_can_charger = millis(); // Update last received time
+  
   if(message->data.byte[6] != charge_current){
     // overwrite the last charge current printed in black
     tft1.setTextColor(ST77XX_BLACK);        
@@ -523,6 +567,8 @@ void soc_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
   #endif
+  
+  last_can_soc = millis(); // Update last received time
 
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
 
@@ -574,6 +620,8 @@ void temp_proc(CAN_FRAME *message) {
     printFrame(message);
   #endif
   
+  last_can_temp = millis(); // Update last received time
+  
   if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
     // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
     tft1.setTextColor(ST77XX_BLACK);
@@ -617,7 +665,9 @@ void temp_proc(CAN_FRAME *message) {
 void delta_proc(CAN_FRAME *message) {
   #ifdef DEBUG 
   printFrame(message);
-  #endif  
+  #endif
+  
+  last_can_delta = millis(); // Update last received time  
 
   if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
 
@@ -796,8 +846,104 @@ void backlight_ramp_down() {
 ///////////////////////////////////////////////// TIMER TASK  ////////////////////////////////////////////////////////////
 
 
+// CAN timeout monitoring and error recovery
+void checkCanTimeouts() {
+  unsigned long current_time = millis();
+  
+  // Check SoC timeout
+  if (current_time - last_can_soc > CAN_TIMEOUT_MS && !soc_error_flag) {
+    soc_error_flag = 1;
+    tft1.setFont(&FreeSansBold24pt7b);
+    tft1.fillRect(4,36,120,90,ST77XX_BLACK);
+    tft1.setTextColor(ST77XX_RED);
+    tft1.setCursor(10,80);
+    tft1.print("CAN!");
+    tft1.setFont(&ev_diy_font);
+    Serial.println("SoC CAN timeout detected");
+  }
+  
+  // Check temp timeout
+  if (current_time - last_can_temp > CAN_TIMEOUT_MS && !temp_error_flag) {
+    temp_error_flag = 1;
+    tft1.drawChar(0,160,130,ST77XX_RED,0,1);
+    tft1.setTextColor(ST77XX_RED);
+    tft1.setCursor(30, 153);
+    tft1.print("TO");
+    Serial.println("Temperature CAN timeout detected");
+  }
+  
+  // Check delta timeout
+  if (current_time - last_can_delta > CAN_TIMEOUT_MS && !delta_error_flag) {
+    delta_error_flag = 1;
+    tft1.drawChar(104,160,131,ST77XX_RED,0,1);
+    tft1.setTextColor(ST77XX_RED);
+    tft1.setCursor(78, 153);
+    tft1.print("TO");
+    Serial.println("Delta CAN timeout detected");
+  }
+  
+  // Check charger timeout - clear display if no data
+  if (current_time - last_can_charger > CAN_TIMEOUT_MS && charge_current != 0) {
+    tft1.setTextColor(ST77XX_BLACK);        
+    tft1.setCursor(76,16);
+    tft1.print(charge_current);
+    tft1.print("A");
+    charge_current = 0;
+    tft1.drawChar(104,24,129,0x9515,0,1); // Gray out charge icon
+    Serial.println("Charger CAN timeout detected");
+  }
+}
+
+// Enhanced CAN bus error detection
+void checkCanBusHealth() {
+  // Check CAN bus status
+  static unsigned long last_can_check = 0;
+  if (millis() - last_can_check > 1000) { // Check every second
+    last_can_check = millis();
+    
+    // If all CAN data is timing out, try to reinitialize CAN bus
+    unsigned long current_time = millis();
+    bool all_timeout = (current_time - last_can_soc > CAN_TIMEOUT_MS * 2) &&
+                       (current_time - last_can_temp > CAN_TIMEOUT_MS * 2) &&
+                       (current_time - last_can_delta > CAN_TIMEOUT_MS * 2);
+    
+    if (all_timeout) {
+      Serial.println("All CAN data timeout - attempting CAN bus recovery");
+      
+      // Try to reinitialize CAN bus
+      CAN0.begin(500000);
+      CAN0.watchFor(0x355, 0xFFF);
+      CAN0.watchFor(0x356, 0xFFF);
+      CAN0.watchFor(0x373, 0xFFF);
+      CAN0.watchFor(0x300, 0xFFF);
+      CAN0.watchFor(0x389, 0xFFF);
+      
+      CAN0.setCallback(0, soc_proc);
+      CAN0.setCallback(1, temp_proc);
+      CAN0.setCallback(2, delta_proc);
+      CAN0.setCallback(3, heater_proc);
+      CAN0.setCallback(4, charger_proc);
+      
+      // Reset timeout counters to prevent immediate re-trigger
+      last_can_soc = current_time;
+      last_can_temp = current_time;
+      last_can_delta = current_time;
+      last_can_heater = current_time;
+      last_can_charger = current_time;
+    }
+  }
+}
+
 void ms10Task() {
   eml();
   eng_speed();
-  asc(); 
+  asc();
+  
+  // Add reliability monitoring every 100ms (every 10th call)
+  static int timeout_check_counter = 0;
+  if (++timeout_check_counter >= 10) {
+    timeout_check_counter = 0;
+    checkCanTimeouts();
+    checkCanBusHealth();
+  }
 }
