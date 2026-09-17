@@ -1,12 +1,17 @@
-/* Canbus-powered information gauge for DIY EV. Designed for Adafruit 1.8in screen powered by ST7755 driver board. 
+/* Canbus-powered information gauge for DIY EV. Designed for Adafruit 1.8in screen powered by ST7735 driver board.
  * Uses SN65HVD canbus transceiver with ESP32 onboard can
  * OTA updating for software in case the driver is buried in your dash
- * Now with added canbus signalling to control analogue gauges and delete error messages in car
- * Added code to read and display information from outlander heater controller - NOT TESTED!!
- * Added dual displays
+ * Reads SoC, pack temp, cell delta, motor current, motor temp, 12V aux voltage, car mode,
+ * error codes and heater status from Zombieverter-mapped CAN signals (see the CanSignal
+ * table and CAN_ID_HEATER below - these CAN IDs are placeholders and MUST be filled in with
+ * your Zombieverter CAN map before flashing). The heater sits on its own CAN bus on the far
+ * side of Zombieverter, so it's only visible here via Zombieverter's mapping too, same as
+ * the battery/motor signals.
+ * Display layout changes with car mode (On / Running / Charging) - see drawModeLayout().
+ * Single physical display (tft1) - a second display was previously wired in software but
+ * never actually installed, so that code has been removed.
 */
- 
-  
+
 //Include libraries for display, OTA and can communications
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -21,42 +26,32 @@
 #include <SPIFFS.h>
 #include <SPIFFS_ImageReader.h> // https://github.com/lucadentella/SPIFFS_ImageReader
 #include <TaskScheduler.h> // https://github.com/arkhipenko/TaskScheduler
-  
+#include <math.h>
+
 // Image reader
 SPIFFS_ImageReader reader;
-  
+
 //#define DEBUG
-  
+
 // OTA CONFIG
-const char* ssid = "gaugedriver";
+const char* ssid = "gaugedriver"; // always-on AP, used as a fallback when not on HOME_WIFI_SSID
 const char* password = "123456789";
-  
+#include "secrets.h" // HOME_WIFI_SSID / HOME_WIFI_PASSWORD - gitignored, see secrets.h.example
+
 unsigned long ota_progress_millis = 0;
-  
-// GAUGE CONFIG
-CAN_FRAME txFrame;
-unsigned long lastMillis;
-int motorSpeed = 0; // If I can get canbus comms running from inverter, can get revs from here
-int clusterStart = 1; // maxes the rev counter dial on start-up
-int motorTemp = 0; // need inverter can comms to get this but could use charger temp as proxy for now
-int mt;
-int revCount;
-int counter_329 = 0;
-int brakeOn = 0;
-unsigned char accelPot = 0x00;
-unsigned char ABSMsg = 0x11; // This is recalculated on a timer so no input needed here
-  
+
 // HEATER DATA
 bool hvPresent = false;
 bool heater_enabled = false;
 bool heating = false;
 
-unsigned char heater_temp;
-unsigned char heater_target;
+unsigned char heater_temp = 0;
+unsigned char heater_target = 0;
+unsigned long heaterTargetChangedAt = 0;
 
-// Web interface  
+// Web interface
 AsyncWebServer server(80);
-  
+
 // Include fonts for display
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold18pt7b.h>
@@ -66,56 +61,106 @@ AsyncWebServer server(80);
 
 // Configure i2c pins for display - 30 pin layout
 // Note change of layout to make wiring simpler
-  
+
 //BLK (backlight) connect to 3v3 output
 //3v3
 //GND
 #define TFT_RST        25
-#define TFT_SDA        26     
+#define TFT_SDA        26
 #define TFT_SCL        27
-#define TFT_DC         33  
-#define TFT_1_CS       14 
-#define TFT_2_CS       32 
-#define TFT_1_BLK      19  
-#define TFT_2_BLK      21
-  
+#define TFT_DC         33
+#define TFT_1_CS       14
+#define TFT_1_BLK      19
+
 // PWM for controlling display brightness
 const int TFT_FREQ = 5000;
 const int TFT_1_BLK_CHAN = 0;
-const int TFT_2_BLK_CHAN = 1;
 const int RESOLUTION = 8;
-  
+
 //TFT CONFIG
 Adafruit_ST7735 tft1 = Adafruit_ST7735(TFT_1_CS, TFT_DC, TFT_SDA, TFT_SCL, TFT_RST);
-Adafruit_ST7735 tft2 = Adafruit_ST7735(TFT_2_CS, TFT_DC, TFT_SDA, TFT_SCL, -1);
 
 // Configure CAN TX/RX Pins
 #define CAN_RX GPIO_NUM_13
 #define CAN_TX GPIO_NUM_15
-  
-// Pi for circle drawing
-float p = 3.1415926;
-  
-// Variables for displayed stats
-int soc;
-int soc_error_flag = 0;
-int delta;
-int delta_error_flag = 0;
-float temp;
-int temp_error_flag = 0;
-int temp_display_delay; // allows for target temp to still be shown for a short delay after you stop twiddling the knob to set it
-int display_temp;
 
+///////////////////////////////////////////////// ZOMBIEVERTER SIGNAL MAP ////////////////////////////////////////////////////////////
+// CAN IDs below are PLACEHOLDERS - replace with the real IDs/offsets from your Zombieverter
+// CAN map before flashing. Several of these may end up sharing a single frame once the real
+// map is known, in which case they can share one CAN0.watchFor()/callback instead of one each.
 
-// Task Scheduling
-void ms10Task();
+struct CanSignal {
+  uint32_t id;         // CAN ID this signal is mapped to on the Zombieverter - TODO fill in
+  uint8_t  byteOffset;  // first data byte of the signal within the frame
+  uint8_t  length;      // 1 or 2 bytes
+  bool     isSigned;
+  float    scale;       // physical value = raw * scale
+};
 
-Task ms10(10, -1, &ms10Task);
+CanSignal SIG_SOC        = { 0x500, 0, 2, false, 1.0 };   // % , 0-100
+CanSignal SIG_PACK_TEMP  = { 0x501, 0, 2, true,  0.1 };   // deg C
+CanSignal SIG_CELL_DELTA = { 0x502, 0, 2, false, 1.0 };   // mV
+CanSignal SIG_MOTOR_AMPS = { 0x503, 0, 2, true,  1.0 };   // A, DC/pack current, signed (+ traction / - regen).
+                                                            // Also reused (sign-inverted) for the Charging-mode
+                                                            // charge-current readout - there's no separate charger
+                                                            // CAN source any more, see drawChargeCurrent().
+CanSignal SIG_MOTOR_TEMP = { 0x504, 0, 1, true,  1.0 };   // deg C
+CanSignal SIG_AUX_VOLTS  = { 0x505, 0, 1, false, 0.1 };   // V, 12V aux battery
+CanSignal SIG_CAR_MODE   = { 0x506, 0, 1, false, 1.0 };   // enum: 0=On 1=Running 2=Charging
+CanSignal SIG_ERROR_CODE = { 0x507, 0, 2, false, 1.0 };   // bitmask of active Zombieverter errors
+
+// The heater controller lives on the heater's own CAN bus, on the far side of Zombieverter -
+// it's only visible here once Zombieverter forwards/maps it onto an ID on the main bus, so
+// this is a placeholder like the signals above, not a direct read. Assumed to keep the same
+// 8-byte layout as before (byte0 HV present, byte1 enabled, byte2 heating active, byte3
+// actual water temp, byte4 target water temp) - adjust heater_can_proc() if Zombieverter
+// remaps the individual fields instead of forwarding the whole frame.
+const uint32_t CAN_ID_HEATER  = 0x508; // TODO Zombieverter-mapped ID for the heater status frame
+
+// Thresholds for exception-only alerting while Running - tune once real signal ranges are known
+const float PACK_TEMP_WARN_C  = 45.0;
+const int   CELL_DELTA_WARN_MV = 50;
+const int   MOTOR_TEMP_WARN_C = 90;
+const int   MAX_MOTOR_AMPS    = 400; // full-scale for the amps gauge
+
+///////////////////////////////////////////////// CAR MODE / DISPLAY STATE ////////////////////////////////////////////////////////////
+
+enum CarMode { MODE_ON, MODE_RUNNING, MODE_CHARGING };
+CarMode currentMode = MODE_ON;
+bool modeChanged = true; // force initial layout draw
+
+// Dirty flags - set by CAN callbacks, cleared by the render task once drawn
+enum {
+  DIRTY_SOC        = 1 << 0,
+  DIRTY_PACKTEMP   = 1 << 1,
+  DIRTY_DELTA      = 1 << 2,
+  DIRTY_AMPS       = 1 << 3,
+  DIRTY_MOTORTEMP  = 1 << 4,
+  DIRTY_AUX        = 1 << 5,
+  DIRTY_ERROR      = 1 << 6,
+  DIRTY_HEATER     = 1 << 7,
+};
+volatile uint16_t dirtyFlags = 0;
+
+// Live values, updated only by CAN callbacks, drawn only by the render task
+volatile int   soc        = -1;   // -1 = unknown / not yet received
+volatile float packTemp   = NAN;
+volatile int   cellDelta  = -1;
+volatile int   motorAmps  = 0;
+volatile int   motorTempC = 0;
+volatile float auxVolts   = 0;
+volatile uint16_t errorCode = 0;
+
+// Task Scheduling - drives the render pass so all TFT drawing happens from one
+// consistent context instead of from inside CAN RX callbacks.
+void renderTask();
+
+Task renderTick(50, -1, &renderTask); // 50ms -> 20Hz, smooth enough for the amps gauge
 
 Scheduler runner;
 
 void setup() {
-   
+
   #ifdef DEBUG
     Serial.begin(115200);
     Serial.print(millis());
@@ -126,43 +171,38 @@ void setup() {
   // Task scheduler
   runner.init();
 
-  runner.addTask(ms10);
-  ms10.enable();
+  runner.addTask(renderTick);
+  renderTick.enable();
 
   pinMode(TFT_RST, OUTPUT);
-  
+
   // initialize SPIFFS
   if(!SPIFFS.begin()) {
     Serial.println("SPIFFS initialisation failed!");
     while (1);
-  }  
+  }
 
   // Initialise 1.8" TFT screen:
   tft1.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
-  tft2.initR(INITR_BLACKTAB);      // Init ST7735S chip, black tab
 
   Serial.print(millis());
   Serial.print("\t");
   Serial.println("TFT Init complete");
 
-  // Setup backlights and set to black
-  ledcSetup(TFT_1_BLK_CHAN, TFT_FREQ, RESOLUTION);  
-  ledcSetup(TFT_2_BLK_CHAN, TFT_FREQ, RESOLUTION);
+  // Setup backlight and set to black
+  ledcSetup(TFT_1_BLK_CHAN, TFT_FREQ, RESOLUTION);
   ledcAttachPin(TFT_1_BLK, TFT_1_BLK_CHAN);
-  ledcAttachPin(TFT_2_BLK, TFT_2_BLK_CHAN);
-  ledcWrite(TFT_1_BLK_CHAN, 0);
   ledcWrite(TFT_1_BLK_CHAN, 0);
 
   Serial.print(millis());
   Serial.print("\t");
   Serial.println("Backlight prep complete");
-    
+
   reader.drawBMP("/launch.bmp", tft1, 0, 0);
-  reader.drawBMP("/launch.bmp", tft2, 0, 0);
 
   Serial.print(millis());
   Serial.print("\t");
-  Serial.println("Logos drawn");
+  Serial.println("Logo drawn");
 
   backlight_ramp_up();
 
@@ -171,198 +211,88 @@ void setup() {
   Serial.println("Backlight ramp complete");
 
   backlight_ramp_down();
-  
+
   tft1.setTextWrap(false);
-  tft1.setRotation(2);
+  tft1.setRotation(0); // flipped 180 from the original - display sits upside-down relative to this in the car
   tft1.fillScreen(ST77XX_BLACK);
   #ifdef DEBUG
     Serial.print(millis());
     Serial.print("\t");
-    Serial.println("Erased Screen 1");
-  #endif
-
-  tft2.setTextWrap(false);
-  tft2.setRotation(2);
-  tft2.fillScreen(ST77XX_BLACK);
-  #ifdef DEBUG
-    Serial.print(millis());
-    Serial.print("\t");
-    Serial.println("Erased Screen 2");
+    Serial.println("Erased Screen");
   #endif
 
   backlight_ramp_up();
 
-  tft1InitialDisplay();
-  tft2InitialDisplay();
-  
+  // Draw the initial (mode = On) layout before any CAN data has arrived
+  drawModeLayout(currentMode);
+  modeChanged = false;
+  dirtyFlags = 0xFFFF;
+
   // Initialise CANBus
   #ifdef DEBUG
     Serial.println("Initializing CANBus...");
   #endif
   CAN0.setCANPins(CAN_RX, CAN_TX);
   CAN0.begin(500000);
-    
+
   // Set up can filters for target IDs
-  CAN0.watchFor(0x355, 0xFFF); //setup a special filter to watch for only 0x355 to get SoC
-  CAN0.watchFor(0x356, 0xFFF); //setup a special filter to watch for only 0x356 to get module temps
-  CAN0.watchFor(0x373, 0xFFF); //setup a special filter to watch for only 0x373 to get cell deltas
-  CAN0.watchFor(0x300, 0xFFF); //setup a special filter to watch for only 0x300 to get heater info
-  CAN0.watchFor(0x389, 0xFFF); //setup a special filter to watch for only 0x389 to get charger info
-    
+  CAN0.watchFor(CAN_ID_HEATER, 0xFFF);
+  CAN0.watchFor(SIG_SOC.id, 0xFFF);
+  CAN0.watchFor(SIG_PACK_TEMP.id, 0xFFF);
+  CAN0.watchFor(SIG_CELL_DELTA.id, 0xFFF);
+  CAN0.watchFor(SIG_MOTOR_AMPS.id, 0xFFF);
+  CAN0.watchFor(SIG_MOTOR_TEMP.id, 0xFFF);
+  CAN0.watchFor(SIG_AUX_VOLTS.id, 0xFFF);
+  CAN0.watchFor(SIG_CAR_MODE.id, 0xFFF);
+  CAN0.watchFor(SIG_ERROR_CODE.id, 0xFFF);
+
   //CAN0.watchFor(); //then let everything else through anyway - enable for debugging
-  
-  // Set callbacks for target IDs to process and update display
-  CAN0.setCallback(0, soc_proc); //callback on first filter to trigger function to update display with SoC
-  CAN0.setCallback(1, temp_proc); //callback on second filter to trigger function to update display with temp
-  CAN0.setCallback(2, delta_proc); //callback on third filter to trigger function to update display with delta
-  CAN0.setCallback(3, heater_proc); //callback on third filter to trigger function to update display with heater info
-  CAN0.setCallback(4, charger_proc); //callback on third filter to trigger function to update display with charger info
 
-  WiFi.mode(WIFI_AP);
+  // Set callbacks for target IDs - order must match the watchFor() calls above
+  CAN0.setCallback(0, heater_can_proc);
+  CAN0.setCallback(1, soc_can_proc);
+  CAN0.setCallback(2, packTemp_can_proc);
+  CAN0.setCallback(3, cellDelta_can_proc);
+  CAN0.setCallback(4, motorAmps_can_proc);
+  CAN0.setCallback(5, motorTemp_can_proc);
+  CAN0.setCallback(6, auxVolts_can_proc);
+  CAN0.setCallback(7, carMode_can_proc);
+  CAN0.setCallback(8, error_can_proc);
+
+  // Run AP and station simultaneously: the "gaugedriver" AP is always reachable for OTA,
+  // and the ESP32 also tries to join HOME_WIFI_SSID in the background so the gauge is
+  // reachable on the home network without needing to connect to the car's own AP first.
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(ssid, password);
+  WiFi.begin(HOME_WIFI_SSID, HOME_WIFI_PASSWORD);
   Serial.println("");
-  
+
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "Gauge Driver OTA Interface");
   });
-  
+
   ElegantOTA.begin(&server);    // Start ElegantOTA
   // ElegantOTA callbacks
   ElegantOTA.onStart(onOTAStart);
   ElegantOTA.onProgress(onOTAProgress);
   ElegantOTA.onEnd(onOTAEnd);
-  
-  server.begin();
-  #ifdef DEBUG
-    Serial.println("HTTP server started");
-  #endif 
-  delay(4000);
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(ssid, password);
-  Serial.println("");
-  
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Gauge Driver OTA Interface");
-  });
-  
-  ElegantOTA.begin(&server);    // Start ElegantOTA
-  // ElegantOTA callbacks
-  ElegantOTA.onStart(onOTAStart);
-  ElegantOTA.onProgress(onOTAProgress);
-  ElegantOTA.onEnd(onOTAEnd);
-  
   server.begin();
   #ifdef DEBUG
-    Serial.print(millis());
-    Serial.print("\t");
     Serial.println("HTTP server started");
-  #endif 
+  #endif
   delay(4000);
 
   #ifdef DEBUG
     Serial.print(millis());
     Serial.print("\t");
     Serial.println("Ready ...!");
-  #endif  
+  #endif
 }
-  
+
 void loop() {
   runner.execute();
   ElegantOTA.loop();
-  
-  #ifdef DEBUG
-//    CAN_FRAME message;
-//    if (CAN0.read(message)) {
-//      printFrame(&message);
-//    }
-  #endif
-  
-  }
-
-///////////////////////////////////////////////// TFT1 INITIAL DISPLAY ////////////////////////////////////////////////////////////
-
-void tft1InitialDisplay() {
-// Initial display before data arrives
-
-// Select custom icon font
-  tft1.setFont(&ev_diy_font);
-
-// Set font size - now consistent throughout
-  tft1.setTextSize(1);
-  
-// Heater icon
-  tft1.drawChar(0,24,128,0x9515,0,1);
-
-// Charge icon
-  tft1.drawChar(104,24,129,0x9515,0,1);
-
-// Module temp icon
-  tft1.drawChar(0,160,130,0x9515,0,1);
-
-// Module delta icon
-  tft1.drawChar(104,160,131,0x9515,0,1);
-
-// test text
-#ifdef DEBUG
-  tft1.setTextColor(0x9515);
-
-//heater
-//  tft1.setCursor(30, 16);
-//  tft1.print("30");
-// charge
-  tft1.setCursor(76, 16);
-  tft1.print("8A");
-#endif
-
-// SoC
-  tft1.drawRoundRect(2, 32, 124, 98, 5, ST77XX_WHITE);
-  tft1.setTextColor(ST77XX_WHITE);
-  tft1.setCursor(10, 70);
-  tft1.print("Waiting for");
-  tft1.setCursor(10, 90);
-  tft1.print("CAN...");
-  soc_error_flag = 1;
-}
-
-///////////////////////////////////////////////// TFT2 INITIAL DISPLAY ////////////////////////////////////////////////////////////
-
-
-void tft2InitialDisplay() {
-  tft2.setFont(&ev_diy_font);
-  tft2.setTextSize(1);
-
-  // Initial display of SoC before data arrives
-  tft2.setCursor(0,12);
-  tft2.setTextColor(ST77XX_RED);  
-  tft2.print("HV");  
-  
-  tft2.setCursor(30,15);
-  tft2.setTextColor(ST77XX_RED);  
-  tft2.print("HE");  
-  
-  tft2.setCursor(60,15);
-  tft2.setTextColor(ST77XX_WHITE);  
-  tft2.print("TAR");  
-  
-  //  tft1.setCursor(20, 70);
-  //  tft1.setTextSize(1);
-  tft2.setCursor(10, 70);
-  tft2.print("Waiting for");
-  tft2.setCursor(10, 90);
-  tft2.print("CAN...");
-     
-  // Initial display of max delta before data arrives
-  tft2.fillTriangle(68, 154, 74, 135, 80, 154, ST77XX_BLUE);
-  tft2.setCursor(84, 153);
-  tft2.print("N/A");
-  
-  // Initial display of module temp before data arrives
-  tft2.fillCircle(8, 140, 2, ST77XX_RED);
-  tft2.fillCircle(8, 150, 4, ST77XX_RED);
-  tft2.fillRect(6, 140, 5, 6, ST77XX_RED);
-  tft2.setCursor(16, 153);
-  tft2.print("N/A");   
 }
 
 ///////////////////////////////////////////////// PRINTFRAME ////////////////////////////////////////////////////////////
@@ -372,7 +302,7 @@ void printFrame(CAN_FRAME *message)
   {
     Serial.print(message->id, HEX);
     if (message->extended) Serial.print(" X ");
-    else Serial.print(" S ");   
+    else Serial.print(" S ");
     Serial.print(message->length, DEC);
     Serial.print(" ");
     for (int i = 0; i < message->length; i++) {
@@ -382,366 +312,396 @@ void printFrame(CAN_FRAME *message)
     Serial.println();
   }
 
-///////////////////////////////////////////////// HEATER PROC ////////////////////////////////////////////////////////////
-  
+///////////////////////////////////////////////// SIGNAL DECODE ////////////////////////////////////////////////////////////
 
-void heater_proc(CAN_FRAME *message)  {
+// Generic decoder for a Zombieverter-mapped signal: little-endian, 1 or 2 bytes, optionally
+// signed, scaled to a physical value. Replaces the hand-rolled byte-shift decoding that used
+// to be duplicated in every CAN callback.
+float decodeSignal(const CanSignal &sig, CAN_FRAME *message) {
+  long raw = message->data.byte[sig.byteOffset];
+  if (sig.length == 2) {
+    raw |= ((long)message->data.byte[sig.byteOffset + 1]) << 8;
+  }
+  if (sig.isSigned) {
+    long signBit = 1L << (sig.length * 8 - 1);
+    if (raw & signBit) raw -= (signBit << 1);
+  }
+  return raw * sig.scale;
+}
+
+///////////////////////////////////////////////// CAN CALLBACKS (data only, no drawing) //////////////////////////////////
+
+void heater_can_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
-  #endif      
+  #endif
 
-  // check the heater status
-  if(message->data.byte[0] == 0) {hvPresent = true;} else {hvPresent = false;} // HV present at heater
-  if(message->data.byte[1] > 0) {heater_enabled = true;} else {heater_enabled = false;} // Heater enabled
-  if(message->data.byte[2] > 0) {heating = true;} else {heating = false;} // Heating is active
+  static bool prevEnabled = false, prevHeating = false;
+  bool changed = false;
 
-  //  set the icon colour based on status
-  if(heater_enabled) {
-    if (heating){
-      tft1.drawChar(0,24,128,0xFA80,0,1);
-    } else {
-    tft1.drawChar(0,24,128,ST77XX_WHITE,0,1);
-    } 
-  } else {
-    tft1.drawChar(0,24,128,0x9515,0,1);
+  hvPresent = (message->data.byte[0] == 0);      // HV present at heater
+  heater_enabled = (message->data.byte[1] > 0);  // Heater enabled
+  heating = (message->data.byte[2] > 0);         // Heating is active
+
+  if (heater_enabled != prevEnabled || heating != prevHeating) {
+    prevEnabled = heater_enabled;
+    prevHeating = heating;
+    changed = true;
   }
 
-  // check if the target temperature has changed
   if (message->data.byte[4] != heater_target) {
-
-    //erase the previous display    
-    // set the cursor to the right position
-    tft1.setCursor(30, 16);
-    
-    //overwrite the old number in black
-    tft1.setTextColor(ST77XX_BLACK);  
-    tft1.print(display_temp);
-
-    // set the variable
     heater_target = message->data.byte[4];
- 
-    // make that the display temperature
-    display_temp = heater_target;
-
-    //set the colour to green
-    tft1.setTextColor(ST77XX_GREEN);  
-
-    //reset the counter for displaying the target tempm after it has been changed
-    temp_display_delay = millis();     
-
-    // display the relevant temperature
-    tft1.setCursor(30, 16);
-    tft1.print(display_temp,1);
-
-  } else if (message->data.byte[3] != heater_temp && millis() - temp_display_delay < 1000) {
-
-    //erase the previous display    
-    // set the cursor to the right position
-    tft1.setCursor(30, 16);
-    
-    //overwrite the old number in black
-    tft1.setTextColor(ST77XX_BLACK);  
-    tft1.print(display_temp);
-
-    // if the target temp hasn't changed and it's more than a second since it did, show the actual temp
-    heater_temp = message->data.byte[3];    
-
-    // make that the display temperature
-    display_temp = heater_temp;
-
-    //set the colour to white
-    tft1.setTextColor(ST77XX_WHITE);  
-
-    // display the relevant temperature
-    tft1.setCursor(30, 16);
-    tft1.print(display_temp,1);
-   
-  } else {
-    // do nothing if nothing has changed
+    heaterTargetChangedAt = millis(); // show the new target for a short delay, then fall back to actual temp
+    changed = true;
   }
 
-  #ifdef DEBUG
-    printFrame(message); 
-    Serial.println("Heater Status");
-    Serial.print("HV Present: ");
-    Serial.print(hvPresent);
-    Serial.print(" Heater Active: ");
-    Serial.print(heating);
-    Serial.print(" Water Temperature: ");
-    Serial.print(heater_temp);
-    Serial.println("C");
-    Serial.println("");
-    Serial.println("Settings");
-    Serial.print(" Heating: ");
-    Serial.print(heating);
-    Serial.print(" Desired Water Temperature: ");
-    Serial.print(heater_target);
-    Serial.println("");
-    Serial.println(""); 
-  #endif  
-  
+  if (message->data.byte[3] != heater_temp) {
+    heater_temp = message->data.byte[3];
+    changed = true;
+  }
+
+  if (changed) dirtyFlags |= DIRTY_HEATER;
 }
 
-///////////////////////////////////////////////// CHARGER PROC ////////////////////////////////////////////////////////////
-
-
-void charger_proc(CAN_FRAME *message) {
+void soc_can_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
   #endif
-  int charge_current;
-  if(message->data.byte[6] != charge_current){
-    // overwrite the last charge current printed in black
-    tft1.setTextColor(ST77XX_BLACK);        
-    tft1.setCursor(76,16);
-    tft1.print(charge_current);
-    tft1.print("A");      
-
-    //Set the new charge current
-    charge_current = message->data.byte[6];
-
-    //if it is greater than 0, write it out
-    if(charge_current > 0) { 
-      // Print charge current
-      tft1.setTextColor(ST77XX_WHITE);        
-      tft1.setCursor(76,16);
-      tft1.print(charge_current);
-      tft1.print("A");
-      // Update charge icon to be green
-      tft1.drawChar(104,24,129,ST77XX_GREEN,0,1);
-    } else {    
-      // Update the charge icon to be white
-      tft1.drawChar(104,24,129,ST77XX_WHITE,0,1);
-    }
-  }
+  int v = (int)decodeSignal(SIG_SOC, message);
+  if (v != soc) { soc = v; dirtyFlags |= DIRTY_SOC; }
 }
 
-///////////////////////////////////////////////// SOC PROC ////////////////////////////////////////////////////////////
-
-
-void soc_proc(CAN_FRAME *message) {
+void packTemp_can_proc(CAN_FRAME *message) {
   #ifdef DEBUG
     printFrame(message);
   #endif
+  float v = decodeSignal(SIG_PACK_TEMP, message);
+  if (v != packTemp) { packTemp = v; dirtyFlags |= DIRTY_PACKTEMP; }
+}
 
-  if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
+void cellDelta_can_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
+    printFrame(message);
+  #endif
+  int v = (int)decodeSignal(SIG_CELL_DELTA, message);
+  if (v != cellDelta) { cellDelta = v; dirtyFlags |= DIRTY_DELTA; }
+}
 
-    tft1.setFont(&FreeSansBold24pt7b);
+void motorAmps_can_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
+    printFrame(message);
+  #endif
+  int v = (int)decodeSignal(SIG_MOTOR_AMPS, message);
+  if (v != motorAmps) { motorAmps = v; dirtyFlags |= DIRTY_AMPS; }
+}
 
-    if(soc_error_flag == 1){
-      tft1.drawRect(4,36,120,90,ST77XX_BLACK);
-      tft1.fillRect(4,36,120,90,ST77XX_BLACK);
-    } else {
-      tft1.setTextColor(ST77XX_BLACK);  
-      tft1.setCursor(10,80);  
-      tft1.print(soc);
-      tft1.print("%");
+void motorTemp_can_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
+    printFrame(message);
+  #endif
+  int v = (int)decodeSignal(SIG_MOTOR_TEMP, message);
+  if (v != motorTempC) { motorTempC = v; dirtyFlags |= DIRTY_MOTORTEMP; }
+}
+
+void auxVolts_can_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
+    printFrame(message);
+  #endif
+  float v = decodeSignal(SIG_AUX_VOLTS, message);
+  if (v != auxVolts) { auxVolts = v; dirtyFlags |= DIRTY_AUX; }
+}
+
+void carMode_can_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
+    printFrame(message);
+  #endif
+  int raw = (int)decodeSignal(SIG_CAR_MODE, message);
+  CarMode m = (raw == 2) ? MODE_CHARGING : (raw == 1) ? MODE_RUNNING : MODE_ON;
+  if (m != currentMode) {
+    currentMode = m;
+    modeChanged = true;
+  }
+}
+
+void error_can_proc(CAN_FRAME *message) {
+  #ifdef DEBUG
+    printFrame(message);
+  #endif
+  uint16_t v = (uint16_t)decodeSignal(SIG_ERROR_CODE, message);
+  if (v != errorCode) { errorCode = v; dirtyFlags |= DIRTY_ERROR; }
+}
+
+///////////////////////////////////////////////// RENDER TASK ////////////////////////////////////////////////////////////
+// Runs on a steady timer via the scheduler - this is the only place that draws to tft1.
+// CAN callbacks above only ever update state and dirty flags.
+
+void renderTask() {
+  if (modeChanged) {
+    drawModeLayout(currentMode);
+    modeChanged = false;
+    dirtyFlags = 0xFFFF; // redraw every field relevant to the new layout
+  }
+
+  if (dirtyFlags & DIRTY_SOC) {
+    drawSoc();
+    dirtyFlags &= ~DIRTY_SOC;
+  }
+
+  switch (currentMode) {
+    case MODE_RUNNING:
+      // Heater is most worth seeing right here - it's the one thing besides SoC/amps that
+      // stays permanently on screen; everything else (temps/delta/errors) is exception-only.
+      if (dirtyFlags & DIRTY_AMPS) {
+        drawAmpsGauge();
+        dirtyFlags &= ~DIRTY_AMPS;
       }
-    soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
-    tft1.setCursor(10,80);  
-    tft1.setTextColor(ST77XX_WHITE);
+      updateHeaterPanel(134);
+      dirtyFlags &= ~(DIRTY_PACKTEMP | DIRTY_DELTA | DIRTY_MOTORTEMP | DIRTY_ERROR | DIRTY_AUX);
+      drawExceptionBanner(); // only touches the screen when the alert state actually changes
+      break;
 
-    if(soc < 101) {
-//      tft1.setTextSize(1);
-      tft1.print(soc);
-      tft1.print("%");
-      
-      #ifdef DEBUG
-      printf("SoC: ");
-      printf("%d%%", soc);
-      printf("\n");
-      #endif
-      soc_error_flag = 0;
-    } else {      
-      tft1.print("...");
-      soc_error_flag = 1;
-      #ifdef DEBUG
-        printf("SoC error >> SoC: ");
-        printf("%d%%", soc);
-        printf("/n");
-      #endif            
+    case MODE_CHARGING:
+      if (dirtyFlags & DIRTY_AMPS) {
+        drawChargeCurrent();
+        dirtyFlags &= ~DIRTY_AMPS;
+      }
+      if (dirtyFlags & DIRTY_PACKTEMP) {
+        drawPackTemp(128);
+        dirtyFlags &= ~DIRTY_PACKTEMP;
+      }
+      updateHeaterPanel(156);
+      dirtyFlags &= ~(DIRTY_DELTA | DIRTY_MOTORTEMP | DIRTY_ERROR | DIRTY_AUX);
+      break;
+
+    case MODE_ON:
+    default:
+      // No heater panel here - HV (and so the heater) is locked out until Running/Charging.
+      if (dirtyFlags & DIRTY_AUX) {
+        drawAuxVolts();
+        dirtyFlags &= ~DIRTY_AUX;
+      }
+      if (dirtyFlags & DIRTY_PACKTEMP) {
+        drawPackTemp(148);
+        dirtyFlags &= ~DIRTY_PACKTEMP;
+      }
+      dirtyFlags &= ~(DIRTY_AMPS | DIRTY_DELTA | DIRTY_MOTORTEMP | DIRTY_ERROR | DIRTY_HEATER);
+      break;
+  }
+}
+
+///////////////////////////////////////////////// MODE LAYOUT ////////////////////////////////////////////////////////////
+
+void drawModeLayout(CarMode mode) {
+  tft1.fillScreen(ST77XX_BLACK);
+
+  tft1.setFont();
+  tft1.setTextSize(1);
+  tft1.setCursor(4, 10);
+  switch (mode) {
+    case MODE_RUNNING:
+      tft1.setTextColor(ST77XX_GREEN);
+      tft1.print("RUNNING");
+      break;
+    case MODE_CHARGING:
+      tft1.setTextColor(ST77XX_CYAN);
+      tft1.print("CHARGING");
+      break;
+    case MODE_ON:
+    default:
+      tft1.setTextColor(ST77XX_WHITE);
+      tft1.print("ON");
+      break;
+  }
+
+  // SoC panel - shown in every mode
+  tft1.drawRoundRect(2, 16, 124, 60, 5, ST77XX_WHITE);
+
+  if (mode == MODE_RUNNING) {
+    tft1.drawRect(6, 96, 116, 14, ST77XX_WHITE); // amps gauge border, filled by drawAmpsGauge()
+    tft1.setFont(&ev_diy_font);
+    tft1.drawChar(6, 134, 128, 0x9515, 0, 1); // heater icon, colour set by updateHeaterPanel()
+  } else if (mode == MODE_CHARGING) {
+    tft1.setFont(&ev_diy_font);
+    tft1.drawChar(6, 100, 129, ST77XX_WHITE, 0, 1); // charge icon
+    tft1.drawChar(6, 128, 130, ST77XX_WHITE, 0, 1); // pack temp icon
+    tft1.drawChar(6, 156, 128, 0x9515, 0, 1); // heater icon, colour set by updateHeaterPanel() - heater only runs while Charging/Running
+  } else { // MODE_ON
+    tft1.setFont(&ev_diy_font);
+    tft1.drawChar(6, 148, 130, ST77XX_WHITE, 0, 1); // pack temp icon
+  }
+
+  tft1.setFont(&ev_diy_font);
+  tft1.setTextSize(1);
+}
+
+///////////////////////////////////////////////// FIELD RENDERERS ////////////////////////////////////////////////////////////
+
+void drawSoc() {
+  tft1.fillRect(4, 18, 120, 56, ST77XX_BLACK);
+  tft1.setFont(&FreeSansBold24pt7b);
+  tft1.setTextColor(ST77XX_WHITE);
+  tft1.setCursor(14, 62);
+  if (soc >= 0 && soc <= 100) {
+    tft1.print(soc);
+    tft1.print("%");
+  } else {
+    tft1.print("--");
+  }
+  tft1.setFont(&ev_diy_font);
+}
+
+void drawAmpsGauge() {
+  const int gx = 6, gy = 96, gw = 116, gh = 14;
+  const int cx = gx + gw / 2;
+
+  // numeric readout above the bar - sits in the gap between the SoC box (ends y76) and
+  // the bar (starts y96), never on top of either
+  tft1.fillRect(gx, gy - 18, gw, 16, ST77XX_BLACK);
+  tft1.setFont(&FreeSansBold12pt7b);
+  tft1.setTextColor(ST77XX_WHITE);
+  tft1.setCursor(gx, gy - 4);
+  tft1.print(motorAmps);
+  tft1.print("A");
+  tft1.setFont(&ev_diy_font);
+
+  // bar, centred on 0A - fills right for traction (+), left for regen (-)
+  tft1.fillRect(gx + 1, gy + 1, gw - 2, gh - 2, ST77XX_BLACK);
+  tft1.drawFastVLine(cx, gy, gh, ST77XX_WHITE);
+
+  int clamped = constrain(motorAmps, -MAX_MOTOR_AMPS, MAX_MOTOR_AMPS);
+  int fillW = map(abs(clamped), 0, MAX_MOTOR_AMPS, 0, gw / 2 - 2);
+  uint16_t barColor = (clamped >= 0) ? ST77XX_GREEN : ST77XX_BLUE;
+  if (fillW > 0) {
+    if (clamped >= 0) {
+      tft1.fillRect(cx + 1, gy + 2, fillW, gh - 4, barColor);
+    } else {
+      tft1.fillRect(cx - 1 - fillW, gy + 2, fillW, gh - 4, barColor);
     }
+  }
+}
+
+void drawChargeCurrent() {
+  // motorAmps is + traction / - regen; while charging the same DC current signal runs the
+  // other way, so flip it here rather than show a confusing "-8A" while charging.
+  int chargeAmps = -motorAmps;
+
+  tft1.fillRect(36, 84, 84, 20, ST77XX_BLACK);
+  tft1.setFont(&FreeSansBold12pt7b);
+  tft1.setTextColor(chargeAmps > 0 ? ST77XX_GREEN : ST77XX_WHITE);
+  tft1.setCursor(36, 100);
+  tft1.print(chargeAmps);
+  tft1.print("A");
+  tft1.setFont(&ev_diy_font);
+}
+
+// baseline matches the pack-temp icon's y in drawModeLayout() for the current mode -
+// On and Charging show it at different rows now that Charging also has a heater row.
+void drawPackTemp(int baseline) {
+  tft1.fillRect(36, baseline - 16, 84, 20, ST77XX_BLACK);
+  tft1.setFont(&FreeSansBold12pt7b);
+  tft1.setTextColor(!isnan(packTemp) && packTemp >= PACK_TEMP_WARN_C ? 0xFA80 : ST77XX_WHITE);
+  tft1.setCursor(36, baseline);
+  if (!isnan(packTemp)) {
+    tft1.print(packTemp, 1);
+    tft1.print("C");
+  } else {
+    tft1.print("--");
+  }
+  tft1.setFont(&ev_diy_font);
+}
+
+void drawAuxVolts() {
+  tft1.fillRect(4, 80, 120, 16, ST77XX_BLACK);
+  tft1.setFont();
+  tft1.setTextSize(1);
+  tft1.setTextColor(auxVolts > 0 && auxVolts < 11.5 ? ST77XX_RED : ST77XX_WHITE);
+  tft1.setCursor(6, 90);
+  tft1.print("12V: ");
+  tft1.print(auxVolts, 1);
+  tft1.print("V");
+  tft1.setFont(&ev_diy_font);
+}
+
+// Heater target/actual display: show the new target for a short delay after it changes,
+// then fall back to showing the actual water temperature. Evaluated every render tick so
+// the delay expiring (not just a new CAN frame) can trigger the switch-over. Called from
+// Running and Charging - the heater's HV is locked out while just On, so there's nothing
+// to show there.
+void updateHeaterPanel(int baseline) {
+  static bool showingTarget = false;
+  bool showTargetNow = (millis() - heaterTargetChangedAt) < 1000;
+
+  if (!(dirtyFlags & DIRTY_HEATER) && showTargetNow == showingTarget) {
+    return; // nothing changed since the last draw
+  }
+  showingTarget = showTargetNow;
+
+  tft1.setFont(&ev_diy_font);
+  uint16_t iconColor;
+  if (heater_enabled) {
+    iconColor = heating ? 0xFA80 : ST77XX_WHITE;
+  } else {
+    iconColor = 0x9515;
+  }
+  tft1.drawChar(6, baseline, 128, iconColor, 0, 1);
+
+  int valueToShow = showTargetNow ? heater_target : heater_temp;
+  uint16_t textColor = showTargetNow ? ST77XX_GREEN : ST77XX_WHITE;
+
+  tft1.fillRect(36, baseline - 16, 60, 18, ST77XX_BLACK);
+  tft1.setFont(&FreeSansBold12pt7b);
+  tft1.setTextColor(textColor);
+  tft1.setCursor(36, baseline);
+  tft1.print(valueToShow);
+  tft1.setFont(&ev_diy_font);
+
+  dirtyFlags &= ~DIRTY_HEATER;
+}
+
+// Running mode only: normally blank. Only draws when pack temp, motor temp, cell delta or an
+// active Zombieverter error crosses into "needs attention", and only redraws when that state
+// actually changes (cheap to call every render tick).
+void drawExceptionBanner() {
+  static char lastAlertText[24] = "";
+  const int alertY = 136, alertH = 22; // the strip left below the amps gauge and heater row
+
+  char text[24] = "";
+  uint16_t color = ST77XX_WHITE;
+
+  if (errorCode != 0) {
+    snprintf(text, sizeof(text), "ERR 0x%04X", errorCode);
+    color = ST77XX_RED;
+  } else if (!isnan(packTemp) && packTemp >= PACK_TEMP_WARN_C) {
+    snprintf(text, sizeof(text), "PACK TEMP %.0fC", packTemp);
+    color = 0xFA80;
+  } else if (motorTempC >= MOTOR_TEMP_WARN_C) {
+    snprintf(text, sizeof(text), "MOTOR TEMP %dC", motorTempC);
+    color = 0xFA80;
+  } else if (cellDelta >= CELL_DELTA_WARN_MV) {
+    snprintf(text, sizeof(text), "CELL DELTA %d", cellDelta);
+    color = 0xFA80;
+  }
+
+  if (strcmp(text, lastAlertText) == 0) {
+    return;
+  }
+  strncpy(lastAlertText, text, sizeof(lastAlertText));
+
+  tft1.fillRect(2, alertY, 124, alertH, ST77XX_BLACK);
+  if (text[0] != '\0') {
+    tft1.drawRect(2, alertY, 124, alertH, color);
+    tft1.setFont();
+    tft1.setTextSize(1);
+    tft1.setTextColor(color);
+    tft1.setCursor(6, alertY + 14);
+    tft1.print(text);
     tft1.setFont(&ev_diy_font);
   }
 }
 
-///////////////////////////////////////////////// TEMP PROC ///////////////////////////////////////////////////////////
-
-
-// Module Temp
-void temp_proc(CAN_FRAME *message) {
-  #ifdef DEBUG
-    printFrame(message);
-  #endif
-  
-  if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
-    // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
-    tft1.setTextColor(ST77XX_BLACK);
-    tft1.setCursor(30, 153);
-    if (temp_error_flag == 0) {  
-      tft1.print(temp,1);
-    } else {
-      tft1.print("!");
-    }
-    
-    // set colour to white and print either data or error warning
-    tft1.setTextColor(ST77XX_WHITE);  
-    tft1.setCursor(30, 153);
-
-    if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 < 35) {
-      tft1.drawChar(0,160,130,0xFFFF,0,1);
-      temp = (message->data.byte[4] + (message->data.byte[5] <<8))/10;  
-      tft1.print(temp,1);
-      #ifdef DEBUG 
-        printf("Temp: ");
-        printf("%d%%", temp);
-        printf("/n");
-      #endif
-      temp_error_flag = 0;
-    } else {
-      tft1.drawChar(0,160,130,ST77XX_RED,0,1);
-      tft1.print("!");
-      temp_error_flag = 1;
-      #ifdef DEBUG        
-        printf("Temp error >> Temp: ");
-        printf("%d%%", temp);
-        printf("/n");
-      #endif
-    }
-  }
-}
-
-///////////////////////////////////////////////// DELTA PROC ////////////////////////////////////////////////////////////
-
-  
-void delta_proc(CAN_FRAME *message) {
-  #ifdef DEBUG 
-  printFrame(message);
-  #endif  
-
-  if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
-
-    // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
-    tft1.setCursor(78, 153);
-    tft1.setTextColor(ST77XX_BLACK);
-    if (delta_error_flag == 0) {  
-      tft1.print(delta);
-    } else {
-      tft1.print("!");
-    }
-
-    // reset the cursor, set delta
-    tft1.setCursor(78, 153);
-    delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
-    // Max Delta
-
-    // if delta is within expected range, just print it in white
-    if(delta > 0 && delta < 50) {
-      tft1.drawChar(104,160,131,ST77XX_WHITE,0,1);
-      tft1.setTextColor(ST77XX_WHITE);        
-      tft1.print(delta);
-      #ifdef DEBUG 
-        printf("Delta: ");
-        printf("%d%%", delta);
-        printf("/n");
-      #endif
-
-      // if delta is high, print it in a warning orange
-    } else if(delta > 50) {  
-      tft1.drawChar(104,160,131,0xFA80,0,1);
-      tft1.setTextColor(0xFA80);        
-      tft1.print(delta);
-      #ifdef DEBUG
-        printf("Delta warning >> Delta: ");
-        printf("%d%%", delta);
-        printf("/n");
-      #endif    
-
-      // if delta is below 0 there is an error, so print it in red
-    } else {
-      tft1.drawChar(104,160,131,ST77XX_RED,0,1);
-      tft1.setTextColor(ST77XX_RED);        
-      tft1.print("!");
-      #ifdef DEBUG
-        printf("Delta error >> Delta: ");
-        printf("%d%%", delta);
-        printf("/n");
-      #endif 
-    }
-  }
-}
-
-///////////////////////////////////////////////// EML - TURN OFF ENGINE MANAGEMENT LIGHT ////////////////////////////////////////////////////////////
-  
-  
-void eml(){
-  txFrame.rtr = 0;  
-  txFrame.id = 0x545;
-  txFrame.length = 8;
-  txFrame.extended = false;
-  txFrame.data.uint8[0] = 0;//2-cel 16-eml 
-  txFrame.data.uint8[1] = 0x00;
-  txFrame.data.uint8[2] = 0x00;
-  txFrame.data.uint8[3] = 0;//overheat(8)
-  txFrame.data.uint8[4] = 0x7e;
-  txFrame.data.uint8[5] = 10;
-  txFrame.data.uint8[6] = 0;
-  txFrame.data.uint8[7] = 18;
-  CAN0.sendFrame(txFrame);
-}
-
-///////////////////////////////////////////////// ENG_SPEED: TRANSLATE MOTOR SPEED INTO REVS - USE FOR CURRENT LATER  ////////////////////////////////////////////////////////////
-  
-void eng_speed() {
-  revCount = map(motorSpeed,0,10000,0 ,44800);
-  if (clusterStart == 0) {revCount = 4800;}
-  if (revCount <= 4800) {revCount = 4800;}
-  if (revCount >= 44800) {revCount = 44800;}
-  if (clusterStart == 1) {revCount = 44800; clusterStart = 0;}
-  
-  txFrame.rtr = 0;
-  txFrame.id = 0x316;
-  txFrame.length = 8;
-  txFrame.extended = false;
-  txFrame.data.uint8[0] = 13;//bit 0 should be 1
-  txFrame.data.uint8[1] = 0;
-  txFrame.data.uint8[2] = lowByte(revCount);//eng speed lsb
-  txFrame.data.uint8[3] = highByte(revCount);//eng speed msb
-  txFrame.data.uint8[4] = 0;
-  txFrame.data.uint8[5] = 0;
-  txFrame.data.uint8[6] = 0;
-  txFrame.data.uint8[7] = 0;
-  CAN0.sendFrame(txFrame);
-}
-
-///////////////////////////////////////////////// ASC - BLUFF STABILITY CONTROL SYSTEM  ////////////////////////////////////////////////////////////
-
-  
-void asc() {
-  if(counter_329 >= 22) {counter_329 = 0;}
-  if(counter_329 == 0) { ABSMsg=0x11;}
-  if(counter_329 >= 8 && counter_329 < 15) {ABSMsg=0x86;}
-  if(counter_329 >= 15) {ABSMsg=0xd9;}
-  counter_329++;   
-  mt=map(motorTemp,0,40,90,254);
-  
-  txFrame.id  = 0x329;
-  txFrame.length = 8;
-  txFrame.extended = false;
-  txFrame.data.uint8[0] = ABSMsg;
-  txFrame.data.uint8[1] = mt;//motor temp 48-255 full scale
-  txFrame.data.uint8[2] = 0xc5;
-  txFrame.data.uint8[3] = 0;//engine status bit4 ,clutch bit0,engine run bit3,ack can bit2
-  txFrame.data.uint8[4] = 0;
-  txFrame.data.uint8[5] = accelPot;//throttle position 00-FE
-  txFrame.data.uint8[6] = brakeOn;//bit 0 brake on
-  txFrame.data.uint8[7] = 0x0;
-  CAN0.sendFrame(txFrame);
-}
-
 ///////////////////////////////////////////////// OTA FUNCTIONS  ////////////////////////////////////////////////////////////
 
-  
+
 void onOTAStart() {
   // Log when OTA has started
   Serial.println("OTA update started!");
@@ -755,7 +715,7 @@ void onOTAProgress(size_t current, size_t final) {
     Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
   }
 }
-  
+
 void onOTAEnd(bool success) {
   // Log when OTA has finished
   if (success) {
@@ -768,36 +728,23 @@ void onOTAEnd(bool success) {
 
 ///////////////////////////////////////////////// BACKLIGHT RAMP UP/DOWN  ////////////////////////////////////////////////////////////
 
-  
+
 void backlight_ramp_up() {
-  for(int dutyCycle = 0; dutyCycle < 255; dutyCycle++){   
+  for(int dutyCycle = 0; dutyCycle < 255; dutyCycle++){
     // changing the LED brightness with PWM
     ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
-    ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
     delay(5);
   }
     ledcWrite(TFT_1_BLK_CHAN, 255);
-    ledcWrite(TFT_2_BLK_CHAN, 255);
     return;
 }
-  
+
 void backlight_ramp_down() {
-  for(int dutyCycle = 255; dutyCycle > 0; dutyCycle--){   
+  for(int dutyCycle = 255; dutyCycle > 0; dutyCycle--){
     // changing the LED brightness with PWM
     ledcWrite(TFT_1_BLK_CHAN, dutyCycle);
-    ledcWrite(TFT_2_BLK_CHAN, dutyCycle);
     delay(5);
   }
     ledcWrite(TFT_1_BLK_CHAN, 0);
-    ledcWrite(TFT_2_BLK_CHAN, 0);
   return;
-}
-
-///////////////////////////////////////////////// TIMER TASK  ////////////////////////////////////////////////////////////
-
-
-void ms10Task() {
-  eml();
-  eng_speed();
-  asc(); 
 }
