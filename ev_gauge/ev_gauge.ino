@@ -380,7 +380,7 @@ void tft1InitialDisplay() {
   tft1.setCursor(8, 130);
   tft1.print("TEMP");
   tft1.setCursor(8, 145); 
-  tft1.print("--°C");
+  tft1.print("--C");
   
   tft1.setCursor(75, 130);
   tft1.print("DELTA");
@@ -388,9 +388,9 @@ void tft1InitialDisplay() {
   tft1.print("--mV");
   
   // Status indicator
-  tft1.setFont(&ev_diy_font);
+  tft1.setFont();  // Built-in 6x8 font; cursor is top-left, so y=151 keeps it on screen
   tft1.setTextColor(COLOR_CAUTION);
-  tft1.setCursor(45, 155);
+  tft1.setCursor(45, 151);
   tft1.print("INIT");
   
   soc_error_flag = 1;
@@ -417,7 +417,7 @@ void tft2InitialDisplay() {
   tft2.setCursor(8, 40);
   tft2.print("HEATER:");
   tft2.setCursor(8, 55);
-  tft2.print("--°C -> --°C");
+  tft2.print("--C -> --C");
   
   // Charging Status Section  
   tft2.setCursor(8, 75);
@@ -496,7 +496,7 @@ void heater_proc(CAN_FRAME *message)  {
     tft1.setTextColor(heating ? COLOR_WARNING : ST77XX_WHITE);
     tft1.setCursor(25, 18);
     tft1.print(heater_temp);
-    tft1.print("°C");
+    tft1.print("C");
     
     // Update detailed heater display on TFT2
     tft2.fillRect(8, 50, 120, 15, ST77XX_BLACK);
@@ -504,9 +504,9 @@ void heater_proc(CAN_FRAME *message)  {
     tft2.setTextColor(heater_enabled ? COLOR_SAFE : COLOR_INACTIVE);
     tft2.setCursor(8, 55);
     tft2.print(heater_temp);
-    tft2.print("°C -> ");
+    tft2.print("C -> ");
     tft2.print(heater_target);
-    tft2.print("°C");
+    tft2.print("C");
   }
 
   #ifdef DEBUG
@@ -666,7 +666,7 @@ void temp_proc(CAN_FRAME *message) {
     
     if(temp < 100 && temp >= 0) {
       tft1.print(temp, 1);
-      tft1.print("°C");
+      tft1.print("C");
       temp_error_flag = 0;
       
       #ifdef DEBUG 
