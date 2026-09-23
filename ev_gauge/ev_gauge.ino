@@ -116,6 +116,13 @@ unsigned long last_can_charger = 0;
 const unsigned long CAN_TIMEOUT_MS = 5000; // 5 second timeout
 bool display_init_success = false;
 
+// Enhanced color system for safety warnings
+#define COLOR_SAFE 0x07E0      // Green
+#define COLOR_CAUTION 0xFFE0   // Yellow  
+#define COLOR_WARNING 0xFD20   // Orange
+#define COLOR_CRITICAL 0xF800  // Red
+#define COLOR_INACTIVE 0x9515  // Gray
+
 
 // Task Scheduling
 void ms10Task();
@@ -320,48 +327,72 @@ void loop() {
   
   }
 
-///////////////////////////////////////////////// TFT1 INITIAL DISPLAY ////////////////////////////////////////////////////////////
+///////////////////////////////////////////////// DISPLAY UTILITY FUNCTIONS ////////////////////////////////////////////////////////////
+
+// Get color for temperature value
+uint16_t getTempColor(float temperature) {
+  if (temperature < 25) return COLOR_SAFE;      // Green: 15-25°C optimal
+  if (temperature < 30) return COLOR_CAUTION;   // Yellow: 25-30°C warm
+  if (temperature < 35) return COLOR_WARNING;   // Orange: 30-35°C hot
+  return COLOR_CRITICAL;                        // Red: >35°C critical
+}
+
+// Get color for delta value  
+uint16_t getDeltaColor(int delta_mv) {
+  if (delta_mv < 20) return COLOR_SAFE;         // Green: 0-20mV balanced
+  if (delta_mv < 35) return COLOR_CAUTION;      // Yellow: 20-35mV minor imbalance
+  if (delta_mv < 50) return COLOR_WARNING;      // Orange: 35-50mV attention needed  
+  return COLOR_CRITICAL;                        // Red: >50mV critical imbalance
+}
+
+// Get color for SoC value
+uint16_t getSocColor(int soc_percent) {
+  if (soc_percent > 40) return COLOR_SAFE;      // Green: >40% normal
+  if (soc_percent > 20) return COLOR_CAUTION;   // Yellow: 20-40% plan charging
+  if (soc_percent > 10) return COLOR_WARNING;   // Orange: 10-20% find charger
+  return COLOR_CRITICAL;                        // Red: <10% emergency
+}
+
+///////////////////////////////////////////////// TFT1 IMPROVED DISPLAY ////////////////////////////////////////////////////////////
 
 void tft1InitialDisplay() {
-// Initial display before data arrives
-
-// Select custom icon font
+  // Clear screen
+  tft1.fillScreen(ST77XX_BLACK);
+  
+  // Set custom icon font for status icons
   tft1.setFont(&ev_diy_font);
-
-// Set font size - now consistent throughout
   tft1.setTextSize(1);
   
-// Heater icon
-  tft1.drawChar(0,24,128,0x9515,0,1);
-
-// Charge icon
-  tft1.drawChar(104,24,129,0x9515,0,1);
-
-// Module temp icon
-  tft1.drawChar(0,160,130,0x9515,0,1);
-
-// Module delta icon
-  tft1.drawChar(104,160,131,0x9515,0,1);
-
-// test text
-#ifdef DEBUG
-  tft1.setTextColor(0x9515);
-
-//heater
-//  tft1.setCursor(30, 16);
-//  tft1.print("30");
-// charge
-  tft1.setCursor(76, 16);
-  tft1.print("8A");
-#endif
-
-// SoC
-  tft1.drawRoundRect(2, 32, 124, 98, 5, ST77XX_WHITE);
+  // Top status bar - Heater and Charge icons with spacing
+  tft1.drawChar(8, 18, 128, COLOR_INACTIVE, 0, 1);   // Heater icon left
+  tft1.drawChar(112, 18, 129, COLOR_INACTIVE, 0, 1); // Charge icon right
+  
+  // Central SoC display - Large and prominent (main fuel gauge)
+  tft1.drawRoundRect(8, 40, 112, 70, 8, ST77XX_WHITE);
+  tft1.setFont(&FreeSansBold24pt7b);
   tft1.setTextColor(ST77XX_WHITE);
-  tft1.setCursor(10, 70);
-  tft1.print("Waiting for");
-  tft1.setCursor(10, 90);
-  tft1.print("CAN...");
+  tft1.setCursor(20, 85);
+  tft1.print("---%");
+  
+  // Bottom status line - Critical safety info (larger than before)
+  tft1.setFont(&FreeSansBold12pt7b);
+  tft1.setTextColor(COLOR_INACTIVE);
+  tft1.setCursor(8, 130);
+  tft1.print("TEMP");
+  tft1.setCursor(8, 145); 
+  tft1.print("--°C");
+  
+  tft1.setCursor(75, 130);
+  tft1.print("DELTA");
+  tft1.setCursor(75, 145);
+  tft1.print("--mV");
+  
+  // Status indicator
+  tft1.setFont(&ev_diy_font);
+  tft1.setTextColor(COLOR_CAUTION);
+  tft1.setCursor(45, 155);
+  tft1.print("INIT");
+  
   soc_error_flag = 1;
 }
 
@@ -369,40 +400,42 @@ void tft1InitialDisplay() {
 
 
 void tft2InitialDisplay() {
-  tft2.setFont(&ev_diy_font);
+  // Clear screen
+  tft2.fillScreen(ST77XX_BLACK);
+  
+  tft2.setFont(&FreeSansBold12pt7b);
   tft2.setTextSize(1);
-
-  // Initial display of SoC before data arrives
-  tft2.setCursor(0,12);
-  tft2.setTextColor(ST77XX_RED);  
-  tft2.print("HV");  
   
-  tft2.setCursor(30,15);
-  tft2.setTextColor(ST77XX_RED);  
-  tft2.print("HE");  
+  // Systems Status Header
+  tft2.setTextColor(ST77XX_WHITE);
+  tft2.setCursor(25, 20);
+  tft2.print("SYSTEMS");
   
-  tft2.setCursor(60,15);
-  tft2.setTextColor(ST77XX_WHITE);  
-  tft2.print("TAR");  
+  // Heater Status Section
+  tft2.setFont(&ev_diy_font);
+  tft2.setTextColor(COLOR_INACTIVE);
+  tft2.setCursor(8, 40);
+  tft2.print("HEATER:");
+  tft2.setCursor(8, 55);
+  tft2.print("--°C -> --°C");
   
-  //  tft1.setCursor(20, 70);
-  //  tft1.setTextSize(1);
-  tft2.setCursor(10, 70);
-  tft2.print("Waiting for");
-  tft2.setCursor(10, 90);
-  tft2.print("CAN...");
-     
-  // Initial display of max delta before data arrives
-  tft2.fillTriangle(68, 154, 74, 135, 80, 154, ST77XX_BLUE);
-  tft2.setCursor(84, 153);
-  tft2.print("N/A");
+  // Charging Status Section  
+  tft2.setCursor(8, 75);
+  tft2.print("CHARGE:");
+  tft2.setCursor(8, 90);
+  tft2.print("-- A");
   
-  // Initial display of module temp before data arrives
-  tft2.fillCircle(8, 140, 2, ST77XX_RED);
-  tft2.fillCircle(8, 150, 4, ST77XX_RED);
-  tft2.fillRect(6, 140, 5, 6, ST77XX_RED);
-  tft2.setCursor(16, 153);
-  tft2.print("N/A");   
+  // System Health Indicators
+  tft2.setCursor(8, 110);
+  tft2.print("CAN: ----");
+  tft2.setCursor(8, 125);
+  tft2.print("WIFI: ---");
+  
+  // Uptime/Status
+  tft2.setCursor(8, 145);
+  tft2.print("UPTIME:");
+  tft2.setCursor(8, 160);
+  tft2.print("--:--");
 }
 
 ///////////////////////////////////////////////// PRINTFRAME ////////////////////////////////////////////////////////////
@@ -437,91 +470,49 @@ void heater_proc(CAN_FRAME *message)  {
   if(message->data.byte[1] > 0) {heater_enabled = true;} else {heater_enabled = false;} // Heater enabled
   if(message->data.byte[2] > 0) {heating = true;} else {heating = false;} // Heating is active
 
-  //  set the icon colour based on status
+  // Update TFT1 heater icon based on status
   if(heater_enabled) {
     if (heating){
-      tft1.drawChar(0,24,128,0xFA80,0,1);
+      tft1.drawChar(8, 18, 128, COLOR_WARNING, 0, 1);  // Orange when heating
     } else {
-    tft1.drawChar(0,24,128,ST77XX_WHITE,0,1);
+      tft1.drawChar(8, 18, 128, COLOR_CAUTION, 0, 1);  // Yellow when enabled but not heating
     } 
   } else {
-    tft1.drawChar(0,24,128,0x9515,0,1);
+    tft1.drawChar(8, 18, 128, COLOR_INACTIVE, 0, 1);   // Gray when disabled
   }
 
-  // check if the target temperature has changed
-  if (message->data.byte[4] != heater_target) {
-
-    //erase the previous display    
-    // set the cursor to the right position
-    tft1.setCursor(30, 16);
+  // Update heater temperature display on TFT1 (top status bar)
+  unsigned char new_heater_temp = message->data.byte[3];
+  unsigned char new_heater_target = message->data.byte[4];
+  
+  if (new_heater_temp != heater_temp || new_heater_target != heater_target) {
+    // Clear previous heater temp display on TFT1
+    tft1.fillRect(25, 8, 40, 15, ST77XX_BLACK);
     
-    //overwrite the old number in black
-    tft1.setTextColor(ST77XX_BLACK);  
-    tft1.print(display_temp);
-
-    // set the variable
-    heater_target = message->data.byte[4];
- 
-    // make that the display temperature
-    display_temp = heater_target;
-
-    //set the colour to green
-    tft1.setTextColor(ST77XX_GREEN);  
-
-    //reset the counter for displaying the target tempm after it has been changed
-    temp_display_delay = millis();     
-
-    // display the relevant temperature
-    tft1.setCursor(30, 16);
-    tft1.print(display_temp,1);
-
-  } else if (message->data.byte[3] != heater_temp && millis() - temp_display_delay < 1000) {
-
-    //erase the previous display    
-    // set the cursor to the right position
-    tft1.setCursor(30, 16);
+    heater_temp = new_heater_temp;
+    heater_target = new_heater_target;
     
-    //overwrite the old number in black
-    tft1.setTextColor(ST77XX_BLACK);  
-    tft1.print(display_temp);
-
-    // if the target temp hasn't changed and it's more than a second since it did, show the actual temp
-    heater_temp = message->data.byte[3];    
-
-    // make that the display temperature
-    display_temp = heater_temp;
-
-    //set the colour to white
-    tft1.setTextColor(ST77XX_WHITE);  
-
-    // display the relevant temperature
-    tft1.setCursor(30, 16);
-    tft1.print(display_temp,1);
-   
-  } else {
-    // do nothing if nothing has changed
+    tft1.setFont(&ev_diy_font);
+    tft1.setTextColor(heating ? COLOR_WARNING : ST77XX_WHITE);
+    tft1.setCursor(25, 18);
+    tft1.print(heater_temp);
+    tft1.print("°C");
+    
+    // Update detailed heater display on TFT2
+    tft2.fillRect(8, 50, 120, 15, ST77XX_BLACK);
+    tft2.setFont(&ev_diy_font);
+    tft2.setTextColor(heater_enabled ? COLOR_SAFE : COLOR_INACTIVE);
+    tft2.setCursor(8, 55);
+    tft2.print(heater_temp);
+    tft2.print("°C -> ");
+    tft2.print(heater_target);
+    tft2.print("°C");
   }
 
   #ifdef DEBUG
-    printFrame(message); 
-    Serial.println("Heater Status");
-    Serial.print("HV Present: ");
-    Serial.print(hvPresent);
-    Serial.print(" Heater Active: ");
-    Serial.print(heating);
-    Serial.print(" Water Temperature: ");
-    Serial.print(heater_temp);
-    Serial.println("C");
-    Serial.println("");
-    Serial.println("Settings");
-    Serial.print(" Heating: ");
-    Serial.print(heating);
-    Serial.print(" Desired Water Temperature: ");
-    Serial.print(heater_target);
-    Serial.println("");
-    Serial.println(""); 
+    printf("Heater: HV=%d, Enabled=%d, Heating=%d, Temp=%d°C, Target=%d°C\n", 
+           hvPresent, heater_enabled, heating, heater_temp, heater_target);
   #endif  
-  
 }
 
 ///////////////////////////////////////////////// CHARGER PROC ////////////////////////////////////////////////////////////
@@ -534,29 +525,48 @@ void charger_proc(CAN_FRAME *message) {
   
   last_can_charger = millis(); // Update last received time
   
-  if(message->data.byte[6] != charge_current){
-    // overwrite the last charge current printed in black
-    tft1.setTextColor(ST77XX_BLACK);        
-    tft1.setCursor(76,16);
-    tft1.print(charge_current);
-    tft1.print("A");      
+  int new_charge_current = message->data.byte[6];
+  
+  if(new_charge_current != charge_current){
+    // Clear previous charge current display on TFT1
+    tft1.fillRect(80, 8, 30, 15, ST77XX_BLACK);
+    
+    charge_current = new_charge_current;
 
-    //Set the new charge current
-    charge_current = message->data.byte[6];
-
-    //if it is greater than 0, write it out
+    // Update TFT1 charge display and icon
+    tft1.setFont(&ev_diy_font);
+    
     if(charge_current > 0) { 
-      // Print charge current
-      tft1.setTextColor(ST77XX_WHITE);        
-      tft1.setCursor(76,16);
+      // Charging active - show green icon and current
+      tft1.drawChar(112, 18, 129, COLOR_SAFE, 0, 1);     // Green charge icon
+      tft1.setTextColor(COLOR_SAFE);        
+      tft1.setCursor(85, 18);
       tft1.print(charge_current);
       tft1.print("A");
-      // Update charge icon to be green
-      tft1.drawChar(104,24,129,ST77XX_GREEN,0,1);
+      
     } else {    
-      // Update the charge icon to be white
-      tft1.drawChar(104,24,129,ST77XX_WHITE,0,1);
+      // Not charging - show gray icon
+      tft1.drawChar(112, 18, 129, COLOR_INACTIVE, 0, 1); // Gray charge icon
     }
+    
+    // Update detailed charge display on TFT2
+    tft2.fillRect(8, 85, 120, 15, ST77XX_BLACK);
+    tft2.setFont(&ev_diy_font);
+    
+    if(charge_current > 0) {
+      tft2.setTextColor(COLOR_SAFE);
+      tft2.setCursor(8, 90);
+      tft2.print(charge_current);
+      tft2.print(" A");
+    } else {
+      tft2.setTextColor(COLOR_INACTIVE);
+      tft2.setCursor(8, 90);
+      tft2.print("0 A");
+    }
+    
+    #ifdef DEBUG
+      printf("Charge Current: %dA\n", charge_current);
+    #endif
   }
 }
 
@@ -571,43 +581,60 @@ void soc_proc(CAN_FRAME *message) {
   last_can_soc = millis(); // Update last received time
 
   if((message->data.byte[1] <<8) + (message->data.byte[0]) != soc){
-
-    tft1.setFont(&FreeSansBold24pt7b);
-
-    if(soc_error_flag == 1){
-      tft1.drawRect(4,36,120,90,ST77XX_BLACK);
-      tft1.fillRect(4,36,120,90,ST77XX_BLACK);
-    } else {
-      tft1.setTextColor(ST77XX_BLACK);  
-      tft1.setCursor(10,80);  
-      tft1.print(soc);
-      tft1.print("%");
-      }
+    
+    // Clear previous SoC display
+    tft1.fillRect(10, 50, 108, 60, ST77XX_BLACK);
+    
     soc = (message->data.byte[1] <<8) + (message->data.byte[0]); 
-    tft1.setCursor(10,80);  
-    tft1.setTextColor(ST77XX_WHITE);
-
+    
+    tft1.setFont(&FreeSansBold24pt7b);
+    
     if(soc < 101) {
-//      tft1.setTextSize(1);
+      // Use color coding for SoC based on charge level
+      uint16_t soc_color = getSocColor(soc);
+      tft1.setTextColor(soc_color);
+      
+      // Center the SoC percentage in the fuel gauge box
+      if(soc < 10) {
+        tft1.setCursor(45, 85);  // Single digit
+      } else {
+        tft1.setCursor(30, 85);  // Two/three digits
+      }
+      
       tft1.print(soc);
       tft1.print("%");
       
+      // Clear any previous error state indicator
+      if(soc_error_flag == 1) {
+        tft1.setFont(&ev_diy_font);
+        tft1.fillRect(40, 150, 50, 15, ST77XX_BLACK);
+        tft1.setTextColor(COLOR_SAFE);
+        tft1.setCursor(45, 155);
+        tft1.print("OK");
+      }
+      
       #ifdef DEBUG
-      printf("SoC: ");
-      printf("%d%%", soc);
-      printf("\n");
+        printf("SoC: %d%%\n", soc);
       #endif
       soc_error_flag = 0;
+      
     } else {      
-      tft1.print("...");
+      // Error state - invalid SoC value
+      tft1.setTextColor(COLOR_CRITICAL);
+      tft1.setCursor(25, 85);
+      tft1.print("ERR");
+      
+      // Show error in status area
+      tft1.setFont(&ev_diy_font);
+      tft1.setTextColor(COLOR_CRITICAL);
+      tft1.setCursor(40, 155);
+      tft1.print("SoC-ERR");
+      
       soc_error_flag = 1;
       #ifdef DEBUG
-        printf("SoC error >> SoC: ");
-        printf("%d%%", soc);
-        printf("/n");
+        printf("SoC error >> SoC: %d%%\n", soc);
       #endif            
     }
-    tft1.setFont(&ev_diy_font);
   }
 }
 
@@ -622,38 +649,38 @@ void temp_proc(CAN_FRAME *message) {
   
   last_can_temp = millis(); // Update last received time
   
-  if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 != temp) {
-    // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
-    tft1.setTextColor(ST77XX_BLACK);
-    tft1.setCursor(30, 153);
-    if (temp_error_flag == 0) {  
-      tft1.print(temp,1);
-    } else {
-      tft1.print("!");
-    }
+  float new_temp = ((message->data.byte[4] + (message->data.byte[5] <<8)))/10.0;
+  
+  if(new_temp != temp) {
+    // Clear previous temperature display
+    tft1.fillRect(8, 135, 60, 25, ST77XX_BLACK);
     
-    // set colour to white and print either data or error warning
-    tft1.setTextColor(ST77XX_WHITE);  
-    tft1.setCursor(30, 153);
-
-    if(((message->data.byte[4] + (message->data.byte[5] <<8)))/10 < 35) {
-      tft1.drawChar(0,160,130,0xFFFF,0,1);
-      temp = (message->data.byte[4] + (message->data.byte[5] <<8))/10;  
-      tft1.print(temp,1);
-      #ifdef DEBUG 
-        printf("Temp: ");
-        printf("%d%%", temp);
-        printf("/n");
-      #endif
+    temp = new_temp;
+    
+    // Use enhanced color coding for temperature
+    uint16_t temp_color = getTempColor(temp);
+    
+    tft1.setFont(&FreeSansBold12pt7b);
+    tft1.setTextColor(temp_color);
+    tft1.setCursor(8, 145);
+    
+    if(temp < 100 && temp >= 0) {
+      tft1.print(temp, 1);
+      tft1.print("°C");
       temp_error_flag = 0;
+      
+      #ifdef DEBUG 
+        printf("Temp: %.1f°C\n", temp);
+      #endif
+      
     } else {
-      tft1.drawChar(0,160,130,ST77XX_RED,0,1);
-      tft1.print("!");
+      // Error state - invalid temperature
+      tft1.setTextColor(COLOR_CRITICAL);
+      tft1.print("T-ERR");
       temp_error_flag = 1;
+      
       #ifdef DEBUG        
-        printf("Temp error >> Temp: ");
-        printf("%d%%", temp);
-        printf("/n");
+        printf("Temp error >> Temp: %.1f°C\n", temp);
       #endif
     }
   }
@@ -664,58 +691,44 @@ void temp_proc(CAN_FRAME *message) {
   
 void delta_proc(CAN_FRAME *message) {
   #ifdef DEBUG 
-  printFrame(message);
+    printFrame(message);
   #endif
   
   last_can_delta = millis(); // Update last received time  
 
-  if((message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8)) != delta) {
+  int new_delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
+  
+  if(new_delta != delta) {
+    // Clear previous delta display
+    tft1.fillRect(75, 135, 53, 25, ST77XX_BLACK);
+    
+    delta = new_delta;
+    
+    // Use enhanced color coding for delta
+    uint16_t delta_color = getDeltaColor(delta);
+    
+    tft1.setFont(&FreeSansBold12pt7b);
+    tft1.setTextColor(delta_color);
+    tft1.setCursor(75, 145);
 
-    // if data has changed, overwrite old data in black - minimises flicker over using black rectangle
-    tft1.setCursor(78, 153);
-    tft1.setTextColor(ST77XX_BLACK);
-    if (delta_error_flag == 0) {  
+    // Display delta value with appropriate formatting
+    if(delta >= 0 && delta < 1000) {
       tft1.print(delta);
-    } else {
-      tft1.print("!");
-    }
-
-    // reset the cursor, set delta
-    tft1.setCursor(78, 153);
-    delta = (message->data.byte[2] + (message->data.byte[3] <<8))-(message->data.byte[0] + (message->data.byte[1] <<8));
-    // Max Delta
-
-    // if delta is within expected range, just print it in white
-    if(delta > 0 && delta < 50) {
-      tft1.drawChar(104,160,131,ST77XX_WHITE,0,1);
-      tft1.setTextColor(ST77XX_WHITE);        
-      tft1.print(delta);
+      tft1.print("mV");
+      delta_error_flag = 0;
+      
       #ifdef DEBUG 
-        printf("Delta: ");
-        printf("%d%%", delta);
-        printf("/n");
+        printf("Delta: %dmV\n", delta);
       #endif
 
-      // if delta is high, print it in a warning orange
-    } else if(delta > 50) {  
-      tft1.drawChar(104,160,131,0xFA80,0,1);
-      tft1.setTextColor(0xFA80);        
-      tft1.print(delta);
-      #ifdef DEBUG
-        printf("Delta warning >> Delta: ");
-        printf("%d%%", delta);
-        printf("/n");
-      #endif    
-
-      // if delta is below 0 there is an error, so print it in red
     } else {
-      tft1.drawChar(104,160,131,ST77XX_RED,0,1);
-      tft1.setTextColor(ST77XX_RED);        
-      tft1.print("!");
+      // Error state - invalid delta value
+      tft1.setTextColor(COLOR_CRITICAL);
+      tft1.print("D-ERR");
+      delta_error_flag = 1;
+      
       #ifdef DEBUG
-        printf("Delta error >> Delta: ");
-        printf("%d%%", delta);
-        printf("/n");
+        printf("Delta error >> Delta: %dmV\n", delta);
       #endif 
     }
   }
