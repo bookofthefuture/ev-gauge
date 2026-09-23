@@ -1,1 +1,6 @@
 ev_gauge/secrets.h
+
+# KiCad lock files, auto-backups and footprint cache
+*.lck
+*-backups/
+fp-info-cache
