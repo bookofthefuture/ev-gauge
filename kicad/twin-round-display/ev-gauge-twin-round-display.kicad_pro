@@ -422,11 +422,22 @@
     "reuse_designators": true,
     "subpart_first_id": 65,
     "subpart_id_separator": 0,
-    "top_level_sheets": [],
-    "used_designators": "",
+    "top_level_sheets": [
+      {
+        "filename": "ev-gauge-twin-round-display.kicad_sch",
+        "name": "ev-gauge-twin-round-display",
+        "uuid": "47682903-efe3-41a8-8749-d5523426d80b"
+      }
+    ],
+    "used_designators": "F1-2,U1-5,Q1-2,D1-4,R1-13,J1-3,C1-13,SW1-2,L1,#PWR1-20,JP1",
     "variants": []
   },
-  "sheets": [],
+  "sheets": [
+    [
+      "47682903-efe3-41a8-8749-d5523426d80b",
+      "ev-gauge-twin-round-display"
+    ]
+  ],
   "text_variables": {},
   "tuning_profiles": {
     "meta": {
